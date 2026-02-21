@@ -1,0 +1,19 @@
+{
+  "name": "simple-widget",
+  "label": "Raster Analysis Widget",
+  "type": "widget",
+  "version": "1.15.0",
+  "exbVersion": "1.15.0",
+  "author": "Jimmy",
+  "description": "This is an Widget used to do raster analysis With it's Aspects like Single Raster Analysis Like NDVI, EVI, SAVI,NDWI,and so on. And also it can do Raster Analysis with Two Rasters like Difference, NDVI Difference and so on.",
+  "copyright": "",
+  "license": "http://www.apache.org/licenses/LICENSE-2.0",
+  "properties": {},
+  "translatedLocales": [
+    "en"
+  ],
+  "defaultSize": {
+    "width": 260,
+    "height": 420
+  }
+}
