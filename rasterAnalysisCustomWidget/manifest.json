@@ -1,5 +1,5 @@
 {
-  "name": "simple_widget",
+  "name": "rasterAnalysisCustomWidget",
   "label": "Raster Analysis Widget",
   "type": "widget",
   "version": "1.15.0",
