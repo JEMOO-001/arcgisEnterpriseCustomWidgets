@@ -3,99 +3,164 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ArcGIS Custom Widgets Browser</title>
+    <title>ArcGIS Custom Widgets</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
-        body { font-family: sans-serif; padding: 20px; line-height: 1.6; }
-        .folder, .file { cursor: pointer; padding: 5px; border-radius: 4px; }
-        .folder:hover, .file:hover { background-color: #f0f0f0; }
-        .folder::before { content: "📁 "; }
-        .file::before { content: "📄 "; }
-        ul { list-style-type: none; padding-left: 20px; }
-        #breadcrumb { margin-bottom: 20px; font-weight: bold; color: #0070bc; }
-        a { text-decoration: none; color: #005a9e; }
-        a:hover { text-decoration: underline; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background: #f5f7fa; color: #333; }
+
+        .header {
+            background: #fff;
+            border-bottom: 1px solid #e2e8f0;
+            padding: 20px 24px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .header h1 { font-size: 18px; font-weight: 600; color: #1a365d; }
+
+        .main { max-width: 800px; margin: 24px auto; padding: 0 20px; }
+
+        .breadcrumb {
+            font-size: 12px;
+            color: #718096;
+            margin-bottom: 16px;
+        }
+        .breadcrumb a { color: #3182ce; text-decoration: none; cursor: pointer; }
+        .breadcrumb a:hover { text-decoration: underline; }
+        .breadcrumb .sep { margin: 0 4px; color: #cbd5e0; }
+
+        .list {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 16px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            text-decoration: none;
+            color: #333;
+            font-size: 13px;
+            transition: background 0.15s;
+        }
+        .item:last-child { border-bottom: none; }
+        .item:hover { background: #f7fafc; }
+        .item-icon { font-size: 16px; width: 24px; text-align: center; flex-shrink: 0; }
+        .item-name { flex: 1; font-weight: 500; }
+        .item-meta { font-size: 11px; color: #a0aec0; }
+        .item-arrow { color: #cbd5e0; font-size: 12px; }
+
+        .loading, .empty {
+            text-align: center;
+            padding: 40px;
+            color: #a0aec0;
+            font-size: 13px;
+        }
+        .spinner {
+            width: 24px; height: 24px;
+            border: 2px solid #e2e8f0;
+            border-top-color: #3182ce;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            margin: 0 auto 8px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .footer {
+            text-align: center;
+            padding: 20px;
+            font-size: 11px;
+            color: #a0aec0;
+        }
+        .footer a { color: #3182ce; text-decoration: none; }
     </style>
 </head>
 <body>
-    <h1>ArcGIS Enterprise Custom Widgets</h1>
-    <div id="breadcrumb"></div>
-    <ul id="file-list"></ul>
+
+    <div class="header">
+        <span style="font-size: 20px;">🛰️</span>
+        <h1>ArcGIS Custom Widgets</h1>
+    </div>
+
+    <div class="main">
+        <div class="breadcrumb" id="breadcrumb"></div>
+        <div class="list" id="file-list">
+            <div class="loading"><div class="spinner"></div>Loading…</div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <a href="https://github.com/JEMOO-001/arcgisEnterpriseCustomWidgets" target="_blank">GitHub</a> · ArcGIS Experience Builder Widgets
+    </div>
 
     <script>
-        // --- YOUR REPO CONFIG ---
         const username = 'JEMOO-001';
         const repo = 'arcgisEnterpriseCustomWidgets';
-        // -------------------------
 
-        async function fetchContents(path = '') {
-            const url = `https://api.github.com/repos/${username}/${repo}/contents/${path}`;
-            const response = await fetch(url);
-            const data = await response.json();
-            return data;
+        function icon(name, type) {
+            if (type === 'dir') return '📁';
+            const ext = name.split('.').pop().toLowerCase();
+            return { zip: '📦', json: '⚙️', tsx: '⚛️', js: '🟨', css: '🎨', html: '🌐', md: '📝', png: '🖼️' }[ext] || '📄';
         }
 
-        function renderContents(contents, path = '') {
-            const fileList = document.getElementById('file-list');
-            fileList.innerHTML = ''; 
+        function size(bytes) {
+            if (!bytes) return '';
+            return bytes < 1024 ? bytes + ' B' : bytes < 1048576 ? (bytes / 1024).toFixed(1) + ' KB' : (bytes / 1048576).toFixed(1) + ' MB';
+        }
 
-            // Add a "Go Back" option if we aren't at the root
-            if (path !== '') {
-                const backItem = document.createElement('li');
-                backItem.className = 'folder';
-                backItem.textContent = '.. (Back)';
-                backItem.onclick = () => {
-                    const parentPath = path.split('/').slice(0, -1).join('/');
-                    navigateTo(parentPath);
-                };
-                fileList.appendChild(backItem);
+        async function fetchContents(path = '') {
+            const r = await fetch(`https://api.github.com/repos/${username}/${repo}/contents/${path}`);
+            return await r.json();
+        }
+
+        function render(contents, path = '') {
+            const el = document.getElementById('file-list');
+            el.innerHTML = '';
+
+            const sorted = contents.sort((a, b) => a.type === 'dir' && b.type !== 'dir' ? -1 : a.type !== 'dir' && b.type === 'dir' ? 1 : a.name.localeCompare(b.name));
+
+            if (path) {
+                const back = document.createElement('div');
+                back.className = 'item';
+                back.onclick = () => go(path.split('/').slice(0, -1).join('/'));
+                back.innerHTML = `<span class="item-icon">↩️</span><span class="item-name">.. Back</span><span class="item-arrow">‹</span>`;
+                el.appendChild(back);
             }
 
-            contents.forEach(item => {
-                const listItem = document.createElement('li');
+            sorted.forEach(item => {
+                const row = document.createElement(item.type === 'dir' ? 'div' : 'a');
+                row.className = 'item';
                 if (item.type === 'dir') {
-                    listItem.className = 'folder';
-                    listItem.textContent = item.name;
-                    listItem.onclick = () => navigateTo(item.path);
+                    row.onclick = () => go(item.path);
+                    row.innerHTML = `<span class="item-icon">${icon(item.name, 'dir')}</span><span class="item-name">${item.name}</span><span class="item-arrow">›</span>`;
                 } else {
-                    listItem.className = 'file';
-                    const link = document.createElement('a');
-                    // Links to the GitHub Pages hosted version of the file
-                    link.href = `https://${username}.github.io/${repo}/${item.path}`;
-                    link.textContent = item.name;
-                    link.target = "_blank"; // Open in new tab
-                    listItem.appendChild(link);
+                    row.href = `https://${username}.github.io/${repo}/${item.path}`;
+                    row.target = '_blank';
+                    row.innerHTML = `<span class="item-icon">${icon(item.name, 'file')}</span><span class="item-name">${item.name}</span><span class="item-meta">${size(item.size)}</span><span class="item-arrow">↗</span>`;
                 }
-                fileList.appendChild(listItem);
+                el.appendChild(row);
             });
         }
 
-        async function navigateTo(path) {
-            updateURL(path);
-            const contents = await fetchContents(path);
-            renderContents(contents, path);
-            updateBreadcrumb(path);
+        async function go(path = '') {
+            history.pushState({ path }, '', path ? `?path=${path}` : location.origin + location.pathname);
+            document.getElementById('file-list').innerHTML = '<div class="loading"><div class="spinner"></div>Loading…</div>';
+            try { render(await fetchContents(path), path); } catch { document.getElementById('file-list').innerHTML = '<div class="empty">⚠️ Failed to load</div>'; }
+
+            const bc = document.getElementById('breadcrumb');
+            let html = `<a onclick="go('')">🏠 Root</a>`;
+            if (path) path.split('/').forEach((p, i, a) => { html += `<span class="sep">›</span>${i === a.length - 1 ? `<strong>${p}</strong>` : `<a onclick="go('${a.slice(0,i+1).join('/')}')">${p}</a>`}`; });
+            bc.innerHTML = html;
         }
 
-        function updateBreadcrumb(path) {
-            const breadcrumb = document.getElementById('breadcrumb');
-            breadcrumb.textContent = 'Root ' + (path ? ' / ' + path.replace(/\//g, ' / ') : '');
-        }
-
-        function updateURL(path) {
-            const newURL = path === '' 
-                ? window.location.origin + window.location.pathname
-                : `?path=${path}`; 
-            history.pushState({ path }, '', newURL);
-        }
-
-        function handleRoute() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const path = urlParams.get('path') || '';
-            navigateTo(path);
-        }
-
-        window.onpopstate = () => handleRoute();
-        handleRoute();
+        window.onpopstate = () => { const p = new URLSearchParams(location.search).get('path'); go(p || ''); };
+        go(new URLSearchParams(location.search).get('path') || '');
     </script>
 </body>
 </html>
