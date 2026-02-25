@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ArcGIS Custom Widgets Browser</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; line-height: 1.6; }
+        .folder, .file { cursor: pointer; padding: 5px; border-radius: 4px; }
+        .folder:hover, .file:hover { background-color: #f0f0f0; }
+        .folder::before { content: "📁 "; }
+        .file::before { content: "📄 "; }
+        ul { list-style-type: none; padding-left: 20px; }
+        #breadcrumb { margin-bottom: 20px; font-weight: bold; color: #0070bc; }
+        a { text-decoration: none; color: #005a9e; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <h1>ArcGIS Enterprise Custom Widgets</h1>
+    <div id="breadcrumb"></div>
+    <ul id="file-list"></ul>
+
+    <script>
+        // --- YOUR REPO CONFIG ---
+        const username = 'JEMOO-001';
+        const repo = 'arcgisEnterpriseCustomWidgets';
+        // -------------------------
+
+        async function fetchContents(path = '') {
+            const url = `https://api.github.com/repos/${username}/${repo}/contents/${path}`;
+            const response = await fetch(url);
+            const data = await response.json();
+            return data;
+        }
+
+        function renderContents(contents, path = '') {
+            const fileList = document.getElementById('file-list');
+            fileList.innerHTML = ''; 
+
+            // Add a "Go Back" option if we aren't at the root
+            if (path !== '') {
+                const backItem = document.createElement('li');
+                backItem.className = 'folder';
+                backItem.textContent = '.. (Back)';
+                backItem.onclick = () => {
+                    const parentPath = path.split('/').slice(0, -1).join('/');
+                    navigateTo(parentPath);
+                };
+                fileList.appendChild(backItem);
+            }
+
+            contents.forEach(item => {
+                const listItem = document.createElement('li');
+                if (item.type === 'dir') {
+                    listItem.className = 'folder';
+                    listItem.textContent = item.name;
+                    listItem.onclick = () => navigateTo(item.path);
+                } else {
+                    listItem.className = 'file';
+                    const link = document.createElement('a');
+                    // Links to the GitHub Pages hosted version of the file
+                    link.href = `https://${username}.github.io/${repo}/${item.path}`;
+                    link.textContent = item.name;
+                    link.target = "_blank"; // Open in new tab
+                    listItem.appendChild(link);
+                }
+                fileList.appendChild(listItem);
+            });
+        }
+
+        async function navigateTo(path) {
+            updateURL(path);
+            const contents = await fetchContents(path);
+            renderContents(contents, path);
+            updateBreadcrumb(path);
+        }
+
+        function updateBreadcrumb(path) {
+            const breadcrumb = document.getElementById('breadcrumb');
+            breadcrumb.textContent = 'Root ' + (path ? ' / ' + path.replace(/\//g, ' / ') : '');
+        }
+
+        function updateURL(path) {
+            const newURL = path === '' 
+                ? window.location.origin + window.location.pathname
+                : `?path=${path}`; 
+            history.pushState({ path }, '', newURL);
+        }
+
+        function handleRoute() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const path = urlParams.get('path') || '';
+            navigateTo(path);
+        }
+
+        window.onpopstate = () => handleRoute();
+        handleRoute();
+    </script>
+</body>
+</html>
