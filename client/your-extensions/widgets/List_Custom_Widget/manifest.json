@@ -1,0 +1,27 @@
+{
+  "name": "List_Custom_Widget",
+  "label": "List Category",
+  "type": "widget",
+  "version": "1.15.0",
+  "exbVersion": "1.15.0",
+  "dependency": "jimu-arcgis",
+  "author": "Esri R&D Center Beijing",
+  "description": "A category selector widget using a dropdown UI that explicitly zooms to features.",
+  "copyright": "",
+  "license": "http://www.apache.org/licenses/LICENSE-2.0",
+  "publishMessages": [
+    "DATA_RECORDS_SELECTION_CHANGE",
+    "STRING_SELECTION_CHANGE"
+  ],
+  "properties": {
+    "hasDataSource": true,
+    "canConsumeDataAction": true
+  },
+  "translatedLocales": [
+    "en"
+  ],
+  "defaultSize": {
+    "width": 300,
+    "height": 500
+  }
+}

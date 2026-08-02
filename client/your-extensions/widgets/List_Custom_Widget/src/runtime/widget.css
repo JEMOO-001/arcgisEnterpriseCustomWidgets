@@ -1,0 +1,155 @@
+/* ═══════════════════════════════════════════════
+   Button-Dropdown Widget  — Gold Theme
+   ═══════════════════════════════════════════════ */
+
+:root {
+  --gold-primary: #D4A017;
+  --gold-secondary: #F2D48E;
+  --gold-hover-bg: #FFF9E6;
+  --gold-btn-hover-bg: #FFFDF7;
+  --text-dark: #333333;
+  --text-light: #666666;
+  --widget-radius: 8px;
+  --shadow-soft: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* ── Container ── */
+.widget-list-custom {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  box-sizing: border-box;
+  font-family: 'Tajawal', 'Cairo', sans-serif;
+  position: relative;
+  background: transparent;
+}
+
+/* ── Force ExB parent wrappers to allow dropdown overflow ── */
+.widget-list-custom,
+.widget-list-custom ~ *,
+.jimu-widget-frame:has(.widget-list-custom),
+.widget-renderer:has(.widget-list-custom),
+.jimu-layout-widget:has(.widget-list-custom),
+.exb-widget-frame:has(.widget-list-custom) {
+  overflow: visible !important;
+}
+
+
+
+/* ── Dropdown Wrapper (needed for absolute positioning) ── */
+.dropdown-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+/* ── Toggle Button ── */
+.dropdown-btn {
+  width: 100%;
+  height: 48px;
+  background: #fff;
+  border: 1.5px solid var(--gold-primary);
+  border-radius: var(--widget-radius);
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--text-dark);
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+  outline: none;
+  font-family: inherit;
+}
+
+.dropdown-btn:hover {
+  box-shadow: 0 2px 8px rgba(212, 160, 23, 0.15);
+  background-color: var(--gold-btn-hover-bg);
+}
+
+.dropdown-btn:active {
+  transform: scale(0.98);
+}
+
+/* ── Chevron ── */
+.dropdown-btn .chevron {
+  font-size: 12px;
+  color: var(--gold-primary);
+  transition: transform 0.3s ease;
+  margin-inline-start: 8px;
+}
+
+.dropdown-btn.open .chevron {
+  transform: rotate(180deg);
+}
+
+/* ── Dropdown List ── */
+.dropdown-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid var(--gold-primary);
+  border-radius: var(--widget-radius);
+  box-shadow: var(--shadow-soft);
+  list-style: none;
+  padding: 8px 0;
+  margin: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  z-index: 9999;
+  /* hidden by default */
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-8px);
+  transition: opacity 0.25s ease, transform 0.25s ease, visibility 0.25s;
+}
+
+.dropdown-list.show {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+/* ── Dropdown Items ── */
+.dropdown-item {
+  padding: 12px 16px;
+  font-size: 15px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+  text-align: right;
+  list-style: none;
+}
+
+.dropdown-item:hover {
+  background-color: var(--gold-hover-bg);
+  color: var(--gold-primary);
+}
+
+.dropdown-item.selected {
+  background-color: var(--gold-hover-bg);
+  color: var(--gold-primary);
+  font-weight: 700;
+}
+
+/* ── Loading overlay ── */
+.widget-list-custom .loading-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 0;
+}
+
+/* ── Scrollbar ── */
+.dropdown-list::-webkit-scrollbar {
+  width: 6px;
+}
+.dropdown-list::-webkit-scrollbar-thumb {
+  background: var(--gold-primary);
+  border-radius: 10px;
+}
+.dropdown-list::-webkit-scrollbar-track {
+  background: #f0f0f0;
+}
