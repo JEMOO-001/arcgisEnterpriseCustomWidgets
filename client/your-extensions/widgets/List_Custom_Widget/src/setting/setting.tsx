@@ -1,6 +1,6 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
-import { React, jsx, Immutable, type UseDataSource, type IMFieldSchema, type DataSource, Fragment } from 'jimu-core'
+import { React, jsx, Immutable, type UseDataSource, type IMFieldSchema, type DataSource } from 'jimu-core'
 import { type AllWidgetSettingProps } from 'jimu-for-builder'
 import { SettingSection, SettingRow, MapWidgetSelector } from 'jimu-ui/advanced/setting-components'
 import { DataSourceSelector, AllDataSourceTypes, FieldSelector } from 'jimu-ui/advanced/data-source-selector'
@@ -22,9 +22,11 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
     }
 
     const onCategoryFieldChange = (allSelectedFields: IMFieldSchema[]) => {
+        const selectedField = allSelectedFields[0]
+        const fieldName = selectedField?.name || selectedField?.jimuName || ''
         onSettingChange({
             id,
-            config: config.set('categoryField', allSelectedFields[0]?.jimuName || '')
+            config: config.set('categoryField', fieldName)
         })
     }
 

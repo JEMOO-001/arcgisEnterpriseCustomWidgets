@@ -66,15 +66,13 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     jimuMapViewRef.current = jmv
   }, [])
 
-  /* ── load unique category values (with optional parent WHERE filter) ── */
-  /* ── load unique category values (with optional parent WHERE filter) ── */
+  /* ── load unique category values (respects layer filters + parent WHERE filter) ── */
   const loadCategories = React.useCallback(async (ds: DataSource, parentWhere: string = '1=1', showLoading: boolean = true) => {
-    if (!config?.categoryField) return
+    if (!config?.categoryField) return []
 
     if (showLoading) setLoading(true)
     try {
-      const items: CategoryItem[] = []
-      const seen = new Map<any, CategoryItem>()
+      const seen = new Map<string, CategoryItem>()
 
       const layer = (ds as any).layer
         || (ds as any).getLayer?.()
@@ -85,118 +83,200 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         await layer.load()
       }
 
-      // METHOD 1 - Read from Subtype directly
-      if (layer?.subtypes?.length > 0 && layer.subtypeField === config.categoryField) {
+      // 1. Resolve real database field name vs jimuName vs alias
+      let realFieldName = config.categoryField
+      let jimuFieldName = config.categoryField
+      let fieldType: string | undefined
+
+      if (ds && typeof (ds as any).getSchema === 'function') {
+        try {
+          const schema = (ds as any).getSchema()
+          if (schema?.fields) {
+            const fSchema = schema.fields[config.categoryField] || Object.values(schema.fields).find(
+              (f: any) => f.jimuName === config.categoryField || f.name === config.categoryField || f.alias === config.categoryField || f.name?.toLowerCase() === config.categoryField?.toLowerCase()
+            )
+            if (fSchema) {
+              if (fSchema.name) realFieldName = fSchema.name
+              if (fSchema.jimuName) jimuFieldName = fSchema.jimuName
+              fieldType = fSchema.type
+            }
+          }
+        } catch { }
+      }
+
+      if (layer?.fields?.length > 0 && (!realFieldName || realFieldName === config.categoryField)) {
+        const fieldObj = layer.fields.find(
+          (f: any) => f.name === config.categoryField || f.alias === config.categoryField || f.jimuName === config.categoryField || f.name?.toLowerCase() === config.categoryField?.toLowerCase()
+        )
+        if (fieldObj?.name) realFieldName = fieldObj.name
+        if (fieldObj?.type) fieldType = fieldObj.type
+      }
+
+      // 2. Subtype / coded-value domain catalog — used for LABELS only.
+      //    Which values are shown is decided by the actual data below.
+      const labelMap = new Map<string, { value: any, label: string }>()
+      if (layer?.subtypes?.length > 0 && layer.subtypeField === realFieldName) {
         layer.subtypes.forEach((st: any) => {
-          items.push({
-            value: st.code ?? st.id,
-            label: String(st.name)
-          })
+          labelMap.set(String(st.code ?? st.id), { value: st.code ?? st.id, label: String(st.name) })
+        })
+      }
+      const domainField = layer?.fields?.find(
+        (f: any) => f.name === realFieldName || f.name === config.categoryField || f.name === jimuFieldName
+      )
+      if (domainField?.domain?.codedValues?.length > 0) {
+        domainField.domain.codedValues.forEach((cv: any) => {
+          labelMap.set(String(cv.code ?? cv.value), { value: cv.code ?? cv.value, label: String(cv.name ?? cv.label) })
         })
       }
 
-      // METHOD 2 - Read from Coded Value Domain
-      if (items.length === 0) {
-        const field = layer?.fields?.find(
-          (f: any) => f.name === config.categoryField || f.alias === config.categoryField
-        )
-        if (field?.domain?.type === 'coded-value' || field?.domain?.codedValues?.length > 0) {
-          const cvs = field.domain.codedValues || []
-          cvs.forEach((cv: any) => {
-            items.push({
-              value: cv.code ?? cv.value,
-              label: String(cv.name ?? cv.label)
-            })
-          })
+      const getRawValue = (r: any): any => {
+        if (!r) return undefined
+        if (typeof r.getFieldValue === 'function') {
+          const v1 = r.getFieldValue(jimuFieldName)
+          if (v1 != null) return v1
+          const v2 = r.getFieldValue(realFieldName)
+          if (v2 != null) return v2
+          const v3 = r.getFieldValue(config.categoryField)
+          if (v3 != null) return v3
         }
+        const data = typeof r.getData === 'function' ? r.getData() : (r.attributes || r.feature?.attributes || r)
+        if (data) {
+          if (data[realFieldName] != null) return data[realFieldName]
+          if (data[jimuFieldName] != null) return data[jimuFieldName]
+          if (data[config.categoryField] != null) return data[config.categoryField]
+          const kLow = (realFieldName || '').toLowerCase()
+          const foundKey = Object.keys(data).find(k => k.toLowerCase() === kLow)
+          if (foundKey && data[foundKey] != null) return data[foundKey]
+        }
+        return undefined
       }
 
-      // If Method 1 or 2 worked, prune codes not active in parent filter
-      if (items.length > 0 && parentWhere !== '1=1') {
-        try {
-          const result = await (ds as any).query({
-            where: parentWhere,
-            outFields: [config.categoryField],
-            returnGeometry: false
-          })
-          const validCodes = new Set()
-          result?.records?.forEach((r: any) => {
-            const raw = r.getData()?.[config.categoryField]
-            if (raw != null) validCodes.add(raw)
-          })
-          if (validCodes.size > 0) {
-            for (let i = items.length - 1; i >= 0; i--) {
-              if (!validCodes.has(items[i].value)) {
-                items.splice(i, 1)
-              }
-            }
-          }
-        } catch (e) {
-          console.warn('Parent filter application failed on domain payload', e)
+      // 3. Collect EVERY filter applied to this layer / data source:
+      //    - filters configured outside ExB (e.g. web map layer filter)
+      //    - filters configured at the ExB data source level
+      //    - runtime filters from OTHER widgets (excludes this widget's own selection)
+      //    - the parentWhere passed in from onDataSourceInfoChange
+      //    The layer's definition expression is used only as a fallback, because ExB
+      //    may also merge widget-applied queries into it.
+      const filterSources: string[] = []
+      const pushWhere = (w: any) => {
+        if (w && typeof w === 'string' && w.trim() !== '' && w.trim().toLowerCase() !== '1=1') {
+          filterSources.push(`(${w.trim()})`)
         }
       }
+      pushWhere((ds as any).getRemoteQueryParams?.()?.where)
+      pushWhere((ds as any).getConfigQueryParams?.()?.where)
+      pushWhere((ds as any).getRuntimeQueryParams?.(id)?.where)
+      pushWhere(parentWhere)
+      if (filterSources.length === 0) {
+        pushWhere(layer?.definitionExpression)
+        pushWhere((ds as any).getDefinitionExpression?.())
+      }
+      const effectiveWhere = filterSources.length > 0 ? filterSources.join(' AND ') : '1=1'
 
-      // METHOD 3 - Use ds.query with getFormattedFieldValue
-      if (items.length === 0) {
-        try {
-          const result = await (ds as any).query({
-            where: parentWhere,
-            outFields: [config.categoryField],
-            pageSize: 5000,
-            returnGeometry: false
-          })
-          result?.records?.forEach((r: any) => {
-            const raw = r.getData()?.[config.categoryField]
-            if (raw == null || seen.has(raw)) return
-            let label = String(raw)
-            try {
-              const fmt = r.getFormattedFieldValue?.(config.categoryField, intl)
-              if (fmt && typeof fmt === 'string' && fmt !== String(raw)) {
-                label = fmt
-              } else if (r.feature?.attributes) {
-                const featRaw = r.feature.attributes[config.categoryField]
-                if (featRaw != null) label = String(featRaw)
-              }
-            } catch { }
-            seen.set(raw, { value: raw, label })
-          })
+      console.log(`[Widget ${id}] Categories effectiveWhere:`, effectiveWhere)
 
-          if (seen.size > 0) {
-            seen.forEach(val => items.push(val))
-          }
-        } catch (e) {
-          console.warn('Method 3 ds.query failed', e)
-        }
+      const pushItem = (raw: any) => {
+        if (raw == null) return
+        const strKey = String(raw)
+        if (strKey.trim() === '') return
+        if (seen.has(strKey)) return
+        const mapped = labelMap.get(strKey)
+        seen.set(strKey, { value: raw, label: mapped ? mapped.label : strKey })
       }
 
-      // METHOD 4 - Direct layer.queryFeatures fallback
-      if (items.length === 0 && layer && typeof layer.queryFeatures === 'function') {
-        try {
+      // 4. METHOD A - distinct value query: server-side, filter-aware, works for any field type.
+      //    Skipped for date fields so METHOD B can produce formatted labels.
+      const isDateField = fieldType === 'esriFieldTypeDate'
+      let dataQueryFailed = false
+      try {
+        if (!isDateField && layer && typeof layer.queryFeatures === 'function') {
           const res = await layer.queryFeatures({
-            where: parentWhere,
-            outFields: [config.categoryField],
-            returnGeometry: false,
-            returnDistinctValues: true
+            where: effectiveWhere,
+            outFields: [realFieldName],
+            returnDistinctValues: true,
+            returnGeometry: false
           })
           res?.features?.forEach((f: any) => {
-            const raw = f.attributes?.[config.categoryField]
-            if (raw != null && !seen.has(raw)) {
-              seen.set(raw, { value: raw, label: String(raw) })
+            let raw = f?.attributes?.[realFieldName]
+            if (raw == null && jimuFieldName !== realFieldName) raw = f?.attributes?.[jimuFieldName]
+            if (raw == null) {
+              const key = Object.keys(f?.attributes || {}).find(k => k.toLowerCase() === realFieldName.toLowerCase())
+              if (key != null) raw = f.attributes[key]
             }
+            pushItem(raw)
           })
-          if (seen.size > 0) {
-            seen.forEach(val => items.push(val))
+        }
+      } catch (e) {
+        console.warn('[Widget] Distinct value query failed, falling back to record query', e)
+      }
+
+      // 5. METHOD B - query all records (paged) and aggregate values
+      if (seen.size === 0) {
+        try {
+          const pageSize = 2000
+          for (let start = 0; start < 40000; start += pageSize) {
+            let records: any[] = []
+            if (layer && typeof layer.queryFeatures === 'function') {
+              const res = await layer.queryFeatures({
+                where: effectiveWhere,
+                outFields: ['*'],
+                returnGeometry: false,
+                num: pageSize,
+                start
+              })
+              records = res?.features || []
+            } else {
+              const result = await (ds as any).query({
+                where: effectiveWhere,
+                outFields: ['*'],
+                returnGeometry: false,
+                pageSize,
+                start
+              })
+              records = result?.records || []
+            }
+
+            records.forEach((r: any) => {
+              const raw = getRawValue(r)
+              if (raw == null) return
+              const strKey = String(raw)
+              if (strKey.trim() === '') return
+              if (seen.has(strKey)) return
+              let label = labelMap.get(strKey)?.label || strKey
+              if (!labelMap.has(strKey) && typeof r.getFormattedFieldValue === 'function') {
+                try {
+                  const fmt = r.getFormattedFieldValue?.(jimuFieldName, intl)
+                    || r.getFormattedFieldValue?.(realFieldName, intl)
+                    || r.getFormattedFieldValue?.(config.categoryField, intl)
+                  if (fmt && typeof fmt === 'string' && fmt !== strKey) label = fmt
+                } catch { }
+              }
+              seen.set(strKey, { value: raw, label })
+            })
+
+            if (records.length < pageSize) break
           }
         } catch (e) {
-          console.warn('Method 4 layer.queryFeatures failed', e)
+          console.warn('[Widget] Record query failed', e)
+          dataQueryFailed = true
         }
       }
 
-      // Apply Sort & Save Result
-      items.sort((a, b) => String(a.label).localeCompare(String(b.label), 'ar'))
-      setCategories(items)
-      console.log(`[Widget ${id}] Loaded Categories:`, items)
-      return items
+      // 6. FALLBACK - only when the data query itself failed, or when no filter is active
+      //    and the layer returned no records, use the subtype/domain catalog.
+      if (seen.size === 0 && (dataQueryFailed || effectiveWhere === '1=1')) {
+        labelMap.forEach((entry) => {
+          pushItem(entry.value)
+        })
+      }
+
+      // 7. Sort & save
+      const finalItems = Array.from(seen.values())
+      finalItems.sort((a, b) => String(a.label).localeCompare(String(b.label), 'ar'))
+      setCategories(finalItems)
+      console.log(`[Widget ${id}] Loaded Categories (${finalItems.length}):`, finalItems)
+      return finalItems
 
     } catch (err) {
       console.error('Failed to load categories:', err)
@@ -266,8 +346,8 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         if (activeCategory !== null) {
           const stillValid = newCategories?.some((c: CategoryItem) => String(c.value) === activeCategory)
           if (!stillValid) {
-            setActiveCategory(null)
-            dataSourceRef.current.updateQueryParams({ where: '1=1' } as FeatureLayerQueryParams, id)
+            setActiveCategory(null);
+            (dataSourceRef.current as any).updateQueryParams({ where: '1=1' } as FeatureLayerQueryParams, id)
           }
         }
       })
@@ -277,13 +357,13 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   /* ── publish StringSelectionChangeMessage for cascading ── */
   const publishSelectionMessage = React.useCallback((values: string[]) => {
     MessageManager.getInstance().publishMessage(
-      new StringSelectionChangeMessage(id, values)
+      new StringSelectionChangeMessage(id, values.join(','))
     )
   }, [id])
 
   /* ── item selected ── */
   const onItemSelect = async (val: string | null, label: string) => {
-    setActiveCategory(val)
+    setActiveCategory(val);
     setIsOpen(false)
 
     // Publish for cascading (to other widget types via Action panel)
@@ -305,7 +385,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     }
 
     // 1. Update map filter (widget-scoped)
-    ds.updateQueryParams({ where } as FeatureLayerQueryParams, id)
+    (ds as any).updateQueryParams({ where } as FeatureLayerQueryParams, id)
 
     // 2. Zoom to the combined extent of all matching features
     const jmv = jimuMapViewRef.current
