@@ -397,7 +397,12 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     const jmv = jimuMapViewRef.current
     if (jmv?.view) {
       try {
-        // Combine parent filter (other widgets) with our own filter for zooming
+        const isAllItems = val === null
+
+        // A category selection must include every feature in that category.
+        // The all-items selection is intentionally different: it returns to
+        // the complete extent of the configured feature layer, regardless of
+        // the current category or other widget filters.
         const combinedWhere = parentWhereRef.current !== '1=1'
           ? `(${parentWhereRef.current}) AND (${where})`
           : where
@@ -408,10 +413,17 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         let zoomExtent: any = null
         const zoomGraphics: any[] = []
 
+        // "All items" means the full configured layer extent, not the extent
+        // of the currently filtered records. fullExtent is the authoritative
+        // extent supplied by the feature service and includes all features.
+        if (isAllItems) {
+          zoomExtent = featureLayer?.fullExtent || null
+        }
+
         // 2a. Best: query through the map's layer view. It honors every filter
         //     applied to the map (web map definition expression + all widget
         //     queries), so the extent matches exactly what is shown.
-        if (jmv.view && typeof (jmv as any).whenJimuLayerViewLoadedByDataSource === 'function') {
+        if (!zoomExtent && jmv.view && typeof (jmv as any).whenJimuLayerViewLoadedByDataSource === 'function') {
           try {
             // Race with a timeout: if the layer is not in this map the promise
             // may never resolve, so fall back to direct layer queries.
@@ -420,7 +432,9 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
               layerViewPromise,
               new Promise((_resolve, reject) => setTimeout(() => reject(new Error('layer view timeout')), 4000))
             ]).then((jlv: any) => jlv?.view)
-            if (layerView && typeof layerView.queryExtent === 'function') {
+            if (isAllItems && layerView?.layer?.fullExtent) {
+              zoomExtent = layerView.layer.fullExtent
+            } else if (layerView && typeof layerView.queryExtent === 'function') {
               const extentResult = await layerView.queryExtent({ where: combinedWhere })
               if (extentResult?.extent) zoomExtent = extentResult.extent
             }
@@ -433,7 +447,10 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         //     applies the layer's own definition expression here.
         if (!zoomExtent && featureLayer && typeof featureLayer.queryExtent === 'function') {
           try {
-            const extentResult = await featureLayer.queryExtent({ where: combinedWhere })
+            const extentResult = await featureLayer.queryExtent({
+              // Do not include parent filters for the all-items extent.
+              where: isAllItems ? '1=1' : combinedWhere
+            })
             if (extentResult?.extent) zoomExtent = extentResult.extent
           } catch (e) {
             console.warn('[Widget] Layer queryExtent failed, falling back to records', e)
@@ -447,7 +464,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
             const pageSize = 1000
             for (let start = 0; start < 20000; start += pageSize) {
               const res = await featureLayer.queryFeatures({
-                where: combinedWhere,
+                where: isAllItems ? '1=1' : combinedWhere,
                 returnGeometry: true,
                 outFields: ['*'],
                 num: pageSize,
@@ -477,6 +494,10 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
           if (w === 0 || h === 0) {
             // Degenerate extent (e.g. a single point): center the view instead
             await jmv.view.goTo({ target: zoomExtent.center, zoom: jmv.view.zoom })
+          } else if (isAllItems) {
+            // Do not pad the configured full extent. This returns exactly to
+            // the complete layer extent requested by the widget behavior.
+            await jmv.view.goTo(zoomExtent)
           } else {
             // Add 20% padding around the extent
             await jmv.view.goTo(zoomExtent.expand(1.2))
