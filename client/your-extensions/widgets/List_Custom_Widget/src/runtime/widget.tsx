@@ -413,13 +413,25 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         let zoomExtent: any = null
         const zoomGraphics: any[] = []
 
-        // The table/data source is the source of truth. Do not use
-        // featureLayer.fullExtent or layerView.queryExtent here because those
-        // can include features excluded by a Table/data-source filter.
-        // Query every filtered table record and union its geometry.
-        if (typeof (ds as any).query === 'function') {
+        const tableWhere = isAllItems ? parentWhereRef.current : combinedWhere
+
+        // Fast path: ask the filtered data source for an aggregate extent.
+        // This keeps the Table/Data Source filters while avoiding transfer of
+        // every feature geometry to the browser.
+        if (typeof (ds as any).queryExtent === 'function') {
           try {
-            const tableWhere = isAllItems ? parentWhereRef.current : combinedWhere
+            const result = await (ds as any).queryExtent({ where: tableWhere })
+            if (result?.extent) zoomExtent = result.extent
+          } catch (e) {
+            console.warn('[Widget] Data source queryExtent failed, paging records', e)
+          }
+        }
+
+        // The table/data source remains the source of truth. If it does not
+        // expose queryExtent(), query every filtered table record and union its
+        // geometry. This is slower but preserves exact filter behavior.
+        if (!zoomExtent && typeof (ds as any).query === 'function') {
+          try {
             const pageSize = 1000
             for (let start = 0; start < 40000; start += pageSize) {
               const result = await (ds as any).query({
@@ -450,11 +462,12 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
           }
         }
 
-        // Fallback only for data sources that do not expose query(). The
-        // supplied WHERE still includes the parent/category selection.
+        // Fallback only for data sources that expose neither queryExtent() nor
+        // query(). The supplied WHERE still includes the parent/category
+        // selection.
         if (!zoomExtent && featureLayer && typeof featureLayer.queryExtent === 'function') {
           try {
-            const extentResult = await featureLayer.queryExtent({ where: isAllItems ? parentWhereRef.current : combinedWhere })
+            const extentResult = await featureLayer.queryExtent({ where: tableWhere })
             if (extentResult?.extent) zoomExtent = extentResult.extent
           } catch (e) {
             console.warn('[Widget] Layer queryExtent failed, falling back to records', e)
@@ -467,7 +480,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
             const pageSize = 1000
             for (let start = 0; start < 20000; start += pageSize) {
               const res = await featureLayer.queryFeatures({
-                where: isAllItems ? parentWhereRef.current : combinedWhere,
+                where: tableWhere,
                 returnGeometry: true,
                 outFields: ['*'],
                 num: pageSize,
