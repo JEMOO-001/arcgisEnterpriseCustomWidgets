@@ -35,6 +35,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const jimuMapViewRef = React.useRef<JimuMapView | null>(null)
   const wrapperRef = React.useRef<HTMLDivElement | null>(null)
   const parentWhereRef = React.useRef<string>('1=1')
+  const tableWhereRef = React.useRef<string>('1=1')
   const realFieldNameRef = React.useRef<string>(config?.categoryField || '')
   const hasLoadedRef = React.useRef<boolean>(false)
 
@@ -171,13 +172,17 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
       }
       pushWhere((ds as any).getRemoteQueryParams?.()?.where)
       pushWhere((ds as any).getConfigQueryParams?.()?.where)
-      pushWhere((ds as any).getRuntimeQueryParams?.(id)?.where)
+       // Do not include this widget's own runtime query. During a new
+       // selection it can still contain the previous category, and for
+       // All Items that would incorrectly keep the old category filter.
+       // Other widget filters are supplied separately through parentWhere.
       pushWhere(parentWhere)
       if (filterSources.length === 0) {
         pushWhere(layer?.definitionExpression)
         pushWhere((ds as any).getDefinitionExpression?.())
       }
       const effectiveWhere = filterSources.length > 0 ? filterSources.join(' AND ') : '1=1'
+      tableWhereRef.current = effectiveWhere
 
       console.log(`[Widget ${id}] Categories effectiveWhere:`, effectiveWhere)
 
@@ -399,13 +404,14 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
       try {
         const isAllItems = val === null
 
-        // A category selection must include every feature in that category.
-        // The all-items selection is intentionally different: it returns to
-        // the complete extent of the configured feature layer, regardless of
-        // the current category or other widget filters.
-        const combinedWhere = parentWhereRef.current !== '1=1'
-          ? `(${parentWhereRef.current}) AND (${where})`
-          : where
+        // Keep the Table/Data Source filter in the server query. The category
+        // condition is added only for a category selection.
+        const tableWhere = tableWhereRef.current !== '1=1'
+          ? `(${tableWhereRef.current})`
+          : ''
+        const combinedWhere = [tableWhere, where !== '1=1' ? `(${where})` : '']
+          .filter(Boolean)
+          .join(' AND ') || '1=1'
 
         const layerDs = ds as any
         const featureLayer = layerDs.layer || layerDs.getLayerDefinition?.()?.layer
@@ -413,96 +419,29 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         let zoomExtent: any = null
         const zoomGraphics: any[] = []
 
-        const tableWhere = isAllItems ? parentWhereRef.current : combinedWhere
+        const extentWhere = isAllItems ? (tableWhere || '1=1') : combinedWhere
 
-        // Fast path: ask the filtered data source for an aggregate extent.
-        // This keeps the Table/Data Source filters while avoiding transfer of
-        // every feature geometry to the browser.
-        if (typeof (ds as any).queryExtent === 'function') {
+        // Use the same server-side queryExtent pattern as the reference
+        // implementation. No feature geometries are downloaded or unioned.
+        if (featureLayer && typeof featureLayer.queryExtent === 'function') {
           try {
-            const result = await (ds as any).queryExtent({ where: tableWhere })
+            const result = await featureLayer.queryExtent({ where: extentWhere })
             if (result?.extent) zoomExtent = result.extent
           } catch (e) {
-            console.warn('[Widget] Data source queryExtent failed, paging records', e)
+            console.warn('[Widget] Server-side extent query failed', e)
           }
         }
 
-        // The table/data source remains the source of truth. If it does not
-        // expose queryExtent(), query every filtered table record and union its
-        // geometry. This is slower but preserves exact filter behavior.
-        if (!zoomExtent && typeof (ds as any).query === 'function') {
+        // DataSource queryExtent is a secondary server-side option.
+        if (!zoomExtent && typeof (ds as any).queryExtent === 'function') {
           try {
-            const pageSize = 1000
-            for (let start = 0; start < 40000; start += pageSize) {
-              const result = await (ds as any).query({
-                where: tableWhere,
-                outFields: ['*'],
-                returnGeometry: true,
-                pageSize,
-                start
-              })
-              const records = result?.records || []
-              records.forEach((record: any) => {
-                const feature = typeof record?.getFeature === 'function'
-                  ? record.getFeature()
-                  : record?.feature
-                const geometry = feature?.geometry || record?.geometry
-                if (geometry) zoomGraphics.push({ geometry })
-              })
-              if (records.length < pageSize) break
-            }
-
-            for (const graphic of zoomGraphics) {
-              const extent = graphic.geometry?.extent || graphic.geometry
-              if (!extent) continue
-              zoomExtent = zoomExtent ? zoomExtent.union(extent) : (extent.clone?.() || extent)
-            }
+            const result = await (ds as any).queryExtent({ where: extentWhere })
+            if (result?.extent) zoomExtent = result.extent
           } catch (e) {
-            console.warn('[Widget] Filtered table extent query failed, falling back', e)
+            console.warn('[Widget] Data source server extent query failed', e)
           }
         }
 
-        // Fallback only for data sources that expose neither queryExtent() nor
-        // query(). The supplied WHERE still includes the parent/category
-        // selection.
-        if (!zoomExtent && featureLayer && typeof featureLayer.queryExtent === 'function') {
-          try {
-            const extentResult = await featureLayer.queryExtent({ where: tableWhere })
-            if (extentResult?.extent) zoomExtent = extentResult.extent
-          } catch (e) {
-            console.warn('[Widget] Layer queryExtent failed, falling back to records', e)
-          }
-        }
-
-        // Last fallback for a raw FeatureLayer data source.
-        if (!zoomExtent && featureLayer && typeof featureLayer.queryFeatures === 'function') {
-          try {
-            const pageSize = 1000
-            for (let start = 0; start < 20000; start += pageSize) {
-              const res = await featureLayer.queryFeatures({
-                where: tableWhere,
-                returnGeometry: true,
-                outFields: ['*'],
-                num: pageSize,
-                start
-              })
-              const feats = res?.features || []
-              feats.forEach((f: any) => {
-                if (f?.geometry) zoomGraphics.push(f)
-              })
-              if (feats.length < pageSize) break
-            }
-
-            for (const g of zoomGraphics) {
-              const geom = g.geometry
-              const gExtent = geom?.extent || geom
-              if (!gExtent) continue
-              zoomExtent = zoomExtent ? zoomExtent.union(gExtent) : (gExtent.clone?.() || gExtent)
-            }
-          } catch (e) {
-            console.warn('[Widget] Record extent fallback failed', e)
-          }
-        }
 
         if (zoomExtent) {
           const w = (zoomExtent as any).width
