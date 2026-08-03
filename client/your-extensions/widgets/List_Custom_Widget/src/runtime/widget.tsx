@@ -413,58 +413,61 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         let zoomExtent: any = null
         const zoomGraphics: any[] = []
 
-        // "All items" means the full configured layer extent, not the extent
-        // of the currently filtered records. fullExtent is the authoritative
-        // extent supplied by the feature service and includes all features.
-        if (isAllItems) {
-          zoomExtent = featureLayer?.fullExtent || null
-        }
-
-        // 2a. Best: query through the map's layer view. It honors every filter
-        //     applied to the map (web map definition expression + all widget
-        //     queries), so the extent matches exactly what is shown.
-        if (!zoomExtent && jmv.view && typeof (jmv as any).whenJimuLayerViewLoadedByDataSource === 'function') {
+        // The table/data source is the source of truth. Do not use
+        // featureLayer.fullExtent or layerView.queryExtent here because those
+        // can include features excluded by a Table/data-source filter.
+        // Query every filtered table record and union its geometry.
+        if (typeof (ds as any).query === 'function') {
           try {
-            // Race with a timeout: if the layer is not in this map the promise
-            // may never resolve, so fall back to direct layer queries.
-            const layerViewPromise = (jmv as any).whenJimuLayerViewLoadedByDataSource(ds)
-            const layerView = await Promise.race([
-              layerViewPromise,
-              new Promise((_resolve, reject) => setTimeout(() => reject(new Error('layer view timeout')), 4000))
-            ]).then((jlv: any) => jlv?.view)
-            if (isAllItems && layerView?.layer?.fullExtent) {
-              zoomExtent = layerView.layer.fullExtent
-            } else if (layerView && typeof layerView.queryExtent === 'function') {
-              const extentResult = await layerView.queryExtent({ where: combinedWhere })
-              if (extentResult?.extent) zoomExtent = extentResult.extent
+            const tableWhere = isAllItems ? parentWhereRef.current : combinedWhere
+            const pageSize = 1000
+            for (let start = 0; start < 40000; start += pageSize) {
+              const result = await (ds as any).query({
+                where: tableWhere,
+                outFields: ['*'],
+                returnGeometry: true,
+                pageSize,
+                start
+              })
+              const records = result?.records || []
+              records.forEach((record: any) => {
+                const feature = typeof record?.getFeature === 'function'
+                  ? record.getFeature()
+                  : record?.feature
+                const geometry = feature?.geometry || record?.geometry
+                if (geometry) zoomGraphics.push({ geometry })
+              })
+              if (records.length < pageSize) break
+            }
+
+            for (const graphic of zoomGraphics) {
+              const extent = graphic.geometry?.extent || graphic.geometry
+              if (!extent) continue
+              zoomExtent = zoomExtent ? zoomExtent.union(extent) : (extent.clone?.() || extent)
             }
           } catch (e) {
-            console.warn('[Widget] Layer view extent failed, falling back', e)
+            console.warn('[Widget] Filtered table extent query failed, falling back', e)
           }
         }
 
-        // 2b. Fallback: query the layer directly. The JS API automatically
-        //     applies the layer's own definition expression here.
+        // Fallback only for data sources that do not expose query(). The
+        // supplied WHERE still includes the parent/category selection.
         if (!zoomExtent && featureLayer && typeof featureLayer.queryExtent === 'function') {
           try {
-            const extentResult = await featureLayer.queryExtent({
-              // Do not include parent filters for the all-items extent.
-              where: isAllItems ? '1=1' : combinedWhere
-            })
+            const extentResult = await featureLayer.queryExtent({ where: isAllItems ? parentWhereRef.current : combinedWhere })
             if (extentResult?.extent) zoomExtent = extentResult.extent
           } catch (e) {
             console.warn('[Widget] Layer queryExtent failed, falling back to records', e)
           }
         }
 
-        // 2c. Last fallback: page through ALL matching features (not limited by
-        //     the data source's page size) and union their extents.
+        // Last fallback for a raw FeatureLayer data source.
         if (!zoomExtent && featureLayer && typeof featureLayer.queryFeatures === 'function') {
           try {
             const pageSize = 1000
             for (let start = 0; start < 20000; start += pageSize) {
               const res = await featureLayer.queryFeatures({
-                where: isAllItems ? '1=1' : combinedWhere,
+                where: isAllItems ? parentWhereRef.current : combinedWhere,
                 returnGeometry: true,
                 outFields: ['*'],
                 num: pageSize,
