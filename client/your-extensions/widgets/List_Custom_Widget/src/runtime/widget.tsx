@@ -7,7 +7,6 @@ import {
   DataSourceComponent,
   type DataSource,
   type FeatureLayerQueryParams,
-  type DataRecord,
   type IMDataSourceInfo,
   MessageManager,
   StringSelectionChangeMessage
@@ -36,6 +35,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const jimuMapViewRef = React.useRef<JimuMapView | null>(null)
   const wrapperRef = React.useRef<HTMLDivElement | null>(null)
   const parentWhereRef = React.useRef<string>('1=1')
+  const realFieldNameRef = React.useRef<string>(config?.categoryField || '')
   const hasLoadedRef = React.useRef<boolean>(false)
 
   /* ── force overflow visible on all ExB parent wrappers ── */
@@ -110,6 +110,11 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         )
         if (fieldObj?.name) realFieldName = fieldObj.name
         if (fieldObj?.type) fieldType = fieldObj.type
+      }
+
+      // Remember the real DB field name so later WHERE clauses (filter + zoom) use it
+      if (realFieldName) {
+        realFieldNameRef.current = realFieldName
       }
 
       // 2. Subtype / coded-value domain catalog — used for LABELS only.
@@ -376,11 +381,12 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     if (val !== null) {
       const catItem = categories.find((c: CategoryItem) => String(c.value) === val)
       const originalValue = catItem ? catItem.value : val
+      const whereField = realFieldNameRef.current || config.categoryField
 
       if (typeof originalValue === 'number') {
-        where = `${config.categoryField} = ${originalValue}`
+        where = `${whereField} = ${originalValue}`
       } else {
-        where = `${config.categoryField} = '${String(originalValue).replace(/'/g, "''")}'`
+        where = `${whereField} = '${String(originalValue).replace(/'/g, "''")}'`
       }
     }
 
@@ -391,45 +397,92 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     const jmv = jimuMapViewRef.current
     if (jmv?.view) {
       try {
-        // Combine parent filter with our own filter for zooming
+        // Combine parent filter (other widgets) with our own filter for zooming
         const combinedWhere = parentWhereRef.current !== '1=1'
           ? `(${parentWhereRef.current}) AND (${where})`
           : where
 
-        // Try using the feature layer's queryExtent for precise calculation
         const layerDs = ds as any
         const featureLayer = layerDs.layer || layerDs.getLayerDefinition?.()?.layer
 
-        if (featureLayer?.queryExtent) {
-          const extentResult = await featureLayer.queryExtent({
-            where: combinedWhere
-          })
-          if (extentResult?.extent) {
-            // Add 20% padding around the extent
-            await jmv.view.goTo(extentResult.extent.expand(1.2))
-          }
-        } else {
-          // Fallback: query records and compute extent from graphics
-          const query: FeatureLayerQueryParams = { where: combinedWhere, returnGeometry: true, outFields: ['*'] }
-          const result = await layerDs.query(query)
-          if (result?.records?.length > 0) {
-            const graphics = result.records.map((r: DataRecord) => (r as any).feature).filter(Boolean)
-            if (graphics.length > 0) {
-              // Build a union extent from all graphics
-              let extent: any = null
-              for (const g of graphics) {
-                const geom = g.geometry
-                if (!geom) continue
-                const gExtent = geom.extent || geom
-                extent = extent ? extent.union(gExtent) : gExtent.clone?.() || gExtent
-              }
-              if (extent?.expand) {
-                await jmv.view.goTo(extent.expand(1.2))
-              } else {
-                await jmv.view.goTo(graphics)
-              }
+        let zoomExtent: any = null
+        const zoomGraphics: any[] = []
+
+        // 2a. Best: query through the map's layer view. It honors every filter
+        //     applied to the map (web map definition expression + all widget
+        //     queries), so the extent matches exactly what is shown.
+        if (jmv.view && typeof (jmv as any).whenJimuLayerViewLoadedByDataSource === 'function') {
+          try {
+            // Race with a timeout: if the layer is not in this map the promise
+            // may never resolve, so fall back to direct layer queries.
+            const layerViewPromise = (jmv as any).whenJimuLayerViewLoadedByDataSource(ds)
+            const layerView = await Promise.race([
+              layerViewPromise,
+              new Promise((_resolve, reject) => setTimeout(() => reject(new Error('layer view timeout')), 4000))
+            ]).then((jlv: any) => jlv?.view)
+            if (layerView && typeof layerView.queryExtent === 'function') {
+              const extentResult = await layerView.queryExtent({ where: combinedWhere })
+              if (extentResult?.extent) zoomExtent = extentResult.extent
             }
+          } catch (e) {
+            console.warn('[Widget] Layer view extent failed, falling back', e)
           }
+        }
+
+        // 2b. Fallback: query the layer directly. The JS API automatically
+        //     applies the layer's own definition expression here.
+        if (!zoomExtent && featureLayer && typeof featureLayer.queryExtent === 'function') {
+          try {
+            const extentResult = await featureLayer.queryExtent({ where: combinedWhere })
+            if (extentResult?.extent) zoomExtent = extentResult.extent
+          } catch (e) {
+            console.warn('[Widget] Layer queryExtent failed, falling back to records', e)
+          }
+        }
+
+        // 2c. Last fallback: page through ALL matching features (not limited by
+        //     the data source's page size) and union their extents.
+        if (!zoomExtent && featureLayer && typeof featureLayer.queryFeatures === 'function') {
+          try {
+            const pageSize = 1000
+            for (let start = 0; start < 20000; start += pageSize) {
+              const res = await featureLayer.queryFeatures({
+                where: combinedWhere,
+                returnGeometry: true,
+                outFields: ['*'],
+                num: pageSize,
+                start
+              })
+              const feats = res?.features || []
+              feats.forEach((f: any) => {
+                if (f?.geometry) zoomGraphics.push(f)
+              })
+              if (feats.length < pageSize) break
+            }
+
+            for (const g of zoomGraphics) {
+              const geom = g.geometry
+              const gExtent = geom?.extent || geom
+              if (!gExtent) continue
+              zoomExtent = zoomExtent ? zoomExtent.union(gExtent) : (gExtent.clone?.() || gExtent)
+            }
+          } catch (e) {
+            console.warn('[Widget] Record extent fallback failed', e)
+          }
+        }
+
+        if (zoomExtent) {
+          const w = (zoomExtent as any).width
+          const h = (zoomExtent as any).height
+          if (w === 0 || h === 0) {
+            // Degenerate extent (e.g. a single point): center the view instead
+            await jmv.view.goTo({ target: zoomExtent.center, zoom: jmv.view.zoom })
+          } else {
+            // Add 20% padding around the extent
+            await jmv.view.goTo(zoomExtent.expand(1.2))
+          }
+        } else if (zoomGraphics.length > 0) {
+          await jmv.view.goTo(zoomGraphics)
         }
       } catch (err) {
         console.error('Zoom failed:', err)
