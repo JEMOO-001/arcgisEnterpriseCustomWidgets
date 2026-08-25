@@ -2,7 +2,7 @@
   "name": "permission-controller",
   "label": "Permission Widget Controller",
   "type": "widget",
-  "version": "1.15.0",
+  "version": "1.15.1",
   "exbVersion": "1.15.0",
   "author": "JEMOO-001",
   "description": "A Widget Controller that hides edit01 until the signed-in user has effective edit and group permissions.",
