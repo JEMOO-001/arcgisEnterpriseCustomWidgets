@@ -1,0 +1,24 @@
+{
+  "behavior": {
+    "onlyOpenOne": true,
+    "openStarts": [],
+    "displayType": "STACK",
+    "vertical": false,
+    "size": {}
+  },
+  "appearance": {
+    "space": 0,
+    "advanced": false,
+    "card": {
+      "showLabel": false,
+      "showTooltip": true,
+      "showIndicator": false,
+      "labelGrowth": 10,
+      "avatar": {
+        "type": "primary",
+        "size": "default",
+        "shape": "circle"
+      }
+    }
+  }
+}
