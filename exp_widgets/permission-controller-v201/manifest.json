@@ -1,0 +1,43 @@
+{
+  "name": "permission-controller-v201",
+  "label": "Permission Widget Controller V2.0.1",
+  "type": "widget",
+  "version": "2.0.1",
+  "exbVersion": "1.15.0",
+  "author": "JEMOO-001",
+  "description": "A general-purpose Widget Controller that controls child widget visibility by Portal group membership while preserving edit01's editing permissions.",
+  "copyright": "",
+  "license": "http://www.apache.org/licenses/LICENSE-2.0",
+  "defaultSize": {
+    "height": 54,
+    "width": 200,
+    "autoWidth": true,
+    "autoHeight": true
+  },
+  "properties": {
+    "hasSettingPage": true,
+    "hasEmbeddedLayout": true,
+    "isWidgetController": true,
+    "supportAutoSize": true,
+    "useDragHandler": true,
+    "canCrossLayoutBoundary": true,
+    "hasBuilderSupportModule": true
+  },
+  "layouts": [
+    {
+      "name": "controller",
+      "label": "Controller layout",
+      "type": "FIXED"
+    }
+  ],
+  "extensions": [
+    {
+      "name": "permission-controller-add-widget",
+      "point": "CONTEXT_TOOL",
+      "uri": "tools/add-widget"
+    }
+  ],
+  "translatedLocales": [
+    "en"
+  ]
+}
