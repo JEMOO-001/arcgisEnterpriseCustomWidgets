@@ -1,0 +1,36 @@
+{
+  "name": "permission-controller",
+  "label": "Permission Widget Controller",
+  "type": "widget",
+  "version": "1.15.0",
+  "exbVersion": "1.15.0",
+  "author": "JEMOO-001",
+  "description": "A Widget Controller that hides edit01 until the signed-in user has effective edit and group permissions.",
+  "copyright": "",
+  "license": "http://www.apache.org/licenses/LICENSE-2.0",
+  "defaultSize": {
+    "height": 54,
+    "width": 200,
+    "autoWidth": true,
+    "autoHeight": true
+  },
+  "properties": {
+    "hasSettingPage": true,
+    "hasEmbeddedLayout": true,
+    "isWidgetController": true,
+    "supportAutoSize": true,
+    "useDragHandler": true,
+    "canCrossLayoutBoundary": true,
+    "hasBuilderSupportModule": true
+  },
+  "layouts": [
+    {
+      "name": "controller",
+      "label": "Controller layout",
+      "type": "FIXED"
+    }
+  ],
+  "translatedLocales": [
+    "en"
+  ]
+}
