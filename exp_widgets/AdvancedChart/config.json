@@ -1,0 +1,8 @@
+{
+  "tools": {
+    "cursorEnable": true
+  },
+  "options": {
+    "hideEmptySeriesInLegend": false
+  }
+}
