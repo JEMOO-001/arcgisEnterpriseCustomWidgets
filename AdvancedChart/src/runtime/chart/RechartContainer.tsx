@@ -276,6 +276,11 @@ export const extractSingleFilterValue = (where?: string, targetField?: string): 
     return undefined
   }
 
+  const cleanVal = (v?: string): string => {
+    if (!v) return ''
+    return v.replace(/^N?'(.*)'$/s, '$1').replace(/^"(.*)"$/s, '$1').trim()
+  }
+
   if (targetField) {
     const cleanTarget = targetField.trim().replace(/^[\["']+|[\]"']+$/g, '')
     const fieldRegex = new RegExp(`(?:^|[^a-zA-Z0-9_\u0600-\u06FF])(?:\\[|")?(?:[a-zA-Z0-9_\u0600-\u06FF]+\\.)?${escapeRegex(cleanTarget)}(?:\\]|")?(?:$|[^a-zA-Z0-9_\u0600-\u06FF])`, 'i')
@@ -284,38 +289,51 @@ export const extractSingleFilterValue = (where?: string, targetField?: string): 
       return undefined
     }
 
-    // Check for IN clause on targetField: e.g. AirportName IN (...) or LOWER(AirportName) IN (...)
-    const inRegex = new RegExp(`(?:\\b(?:LOWER|UPPER)\\s*\\(\\s*)?(?:\\[|")?(?:[a-zA-Z0-9_\u0600-\u06FF]+\\.)?${escapeRegex(cleanTarget)}(?:\\]|")?\\s*\\)?\\s+IN\\s*\\(([^)]+)\\)`, 'i')
-    const inMatch = str.match(inRegex)
-    if (inMatch) {
-      const inContent = inMatch[1].trim()
-      const items = inContent.split(/,(?=(?:(?:[^']*'){2})*[^']*$)(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(s => s.trim()).filter(Boolean)
-      if (items.length === 1) {
-        const orRegex = new RegExp(`(?:\\bOR\\b[^(]*?(?:\\[|")?${escapeRegex(cleanTarget)}(?:\\]|")?)|(?:(?:\\[|")?${escapeRegex(cleanTarget)}(?:\\]|")?[^)]*?\\bOR\\b)`, 'i')
-        if (!orRegex.test(str)) {
-          const raw = items[0]
-          const cleanVal = raw.replace(/^N?'(.*)'$/s, '$1').replace(/^"(.*)"$/s, '$1').trim()
-          if (cleanVal && cleanVal.toLowerCase() !== cleanTarget.toLowerCase()) {
-            return cleanVal
+    // Check if there is an OR clause introducing alternative conditions on targetField
+    const orRegex = new RegExp(`(?:\\bOR\\b[^(]*?(?:\\[|")?${escapeRegex(cleanTarget)}(?:\\]|")?)|(?:(?:\\[|")?${escapeRegex(cleanTarget)}(?:\\]|")?[^)]*?\\bOR\\b)`, 'i')
+    const hasOrOnTarget = orRegex.test(str)
+
+    // 1. Check for equality matches on targetField: e.g. AirportName = 'Cairo', LOWER(AirportName) = 22
+    const eqRegex = new RegExp(`(?:\\b(?:LOWER|UPPER)\\s*\\(\\s*)?(?:\\[|")?(?:[a-zA-Z0-9_\u0600-\u06FF]+\\.)?${escapeRegex(cleanTarget)}(?:\\]|")?\\s*\\)?\\s*=\\s*(?:\\b(?:LOWER|UPPER)\\s*\\(\\s*)?(?:N?'([^']*)'|"([^"]*)"|([^\\s(),;]+))\\s*\\)?`, 'gi')
+    const eqMatches = Array.from(str.matchAll(eqRegex))
+    const eqValues = new Set<string>()
+    for (const m of eqMatches) {
+      const v = cleanVal(m[1] ?? m[2] ?? m[3] ?? '')
+      // Ignore self-comparison (e.g. AirportName = AirportName)
+      if (v && v.toLowerCase() !== cleanTarget.toLowerCase()) {
+        eqValues.add(v)
+      }
+    }
+
+    if (eqValues.size === 1 && !hasOrOnTarget) {
+      return Array.from(eqValues)[0]
+    }
+    if (eqValues.size > 1 || (eqValues.size > 0 && hasOrOnTarget)) {
+      return undefined
+    }
+
+    // 2. Check for IN clause on targetField: e.g. AirportName IN (...)
+    const inRegex = new RegExp(`(?:\\b(?:LOWER|UPPER)\\s*\\(\\s*)?(?:\\[|")?(?:[a-zA-Z0-9_\u0600-\u06FF]+\\.)?${escapeRegex(cleanTarget)}(?:\\]|")?\\s*\\)?\\s+IN\\s*\\(([^)]+)\\)`, 'gi')
+    const inMatches = Array.from(str.matchAll(inRegex))
+    if (inMatches.length > 0 && !hasOrOnTarget) {
+      const allInValues: string[] = []
+      for (const im of inMatches) {
+        const inContent = im[1].trim()
+        const items = inContent.split(/,(?=(?:(?:[^']*'){2})*[^']*$)(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(s => s.trim()).filter(Boolean)
+        if (items.length === 1) {
+          const v = cleanVal(items[0])
+          if (v && v.toLowerCase() !== cleanTarget.toLowerCase()) {
+            allInValues.push(v)
           }
+        } else {
+          return undefined
         }
       }
-      return undefined
-    }
-
-    const orRegex = new RegExp(`(?:\\bOR\\b[^(]*?(?:\\[|")?${escapeRegex(cleanTarget)}(?:\\]|")?)|(?:(?:\\[|")?${escapeRegex(cleanTarget)}(?:\\]|")?[^)]*?\\bOR\\b)`, 'i')
-    if (orRegex.test(str)) {
-      return undefined
-    }
-
-    // Check for equality on targetField: e.g. AirportName = 'Cairo', LOWER(AirportName) = 'Cairo', AirportName = N'Cairo'
-    const eqRegex = new RegExp(`(?:\\b(?:LOWER|UPPER)\\s*\\(\\s*)?(?:\\[|")?(?:[a-zA-Z0-9_\u0600-\u06FF]+\\.)?${escapeRegex(cleanTarget)}(?:\\]|")?\\s*\\)?\\s*=\\s*(?:\\b(?:LOWER|UPPER)\\s*\\(\\s*)?(?:N?'([^']*)'|"([^"]*)"|([^\\s)]+))\\s*\\)?`, 'gi')
-    const matches = Array.from(str.matchAll(eqRegex))
-
-    if (matches.length === 1) {
-      const val = (matches[0][1] ?? matches[0][2] ?? matches[0][3] ?? '').trim()
-      if (val && val.toLowerCase() !== cleanTarget.toLowerCase()) {
-        return val
+      if (allInValues.length > 0) {
+        const uniqueIn = Array.from(new Set(allInValues))
+        if (uniqueIn.length === 1) {
+          return uniqueIn[0]
+        }
       }
     }
 
@@ -635,17 +653,67 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
 
   const dsInfo = ReactRedux.useSelector((state: IMState) => state.dataSourcesInfo?.[dataSourceId])
   const mainDsInfo = ReactRedux.useSelector((state: IMState) => state.dataSourcesInfo?.[mainDataSourceId])
+  const allDataSourcesInfo = ReactRedux.useSelector((state: IMState) => state.dataSourcesInfo)
 
   const isSingleValue = React.useMemo(() => {
     if (!rechartEnabled || !dataSourceId) return false
     const ds = DataSourceManager.getInstance().getDataSource(dataSourceId)
     if (!ds) return false
 
+    // 1. Direct queryParams where clause on the dataSource
     const where = (ds as QueriableDataSource)?.getCurrentQueryParams?.()?.where
     if (isFieldFilteredToSingleValue(where, triggerField)) {
       return true
     }
 
+    // 2. Direct queryParams where clause on the main dataSource
+    if (mainDataSourceId && mainDataSourceId !== dataSourceId) {
+      const mainDs = DataSourceManager.getInstance().getDataSource(mainDataSourceId)
+      const mainWhere = (mainDs as QueriableDataSource)?.getCurrentQueryParams?.()?.where
+      if (isFieldFilteredToSingleValue(mainWhere, triggerField)) {
+        return true
+      }
+    }
+
+    // 3. Check all widgetQueries on this dataSource and mainDataSource (e.g. from outside filter widget or List_Custom_Widget)
+    const checkInfoQueries = (info?: any): boolean => {
+      const wq = info?.widgetQueries
+      if (!wq || typeof wq !== 'object') return false
+      for (const key of Object.keys(wq)) {
+        const qWhere = wq[key]?.where
+        if (isFieldFilteredToSingleValue(qWhere, triggerField)) {
+          return true
+        }
+      }
+      return false
+    }
+    if (checkInfoQueries(dsInfo) || checkInfoQueries(mainDsInfo)) {
+      return true
+    }
+
+    // 4. Check if any airport-related data source in the app has a single value filter or single selected record
+    if (allDataSourcesInfo) {
+      for (const otherId of Object.keys(allDataSourcesInfo)) {
+        if (otherId === dataSourceId || otherId === mainDataSourceId) continue
+        const otherInfo = allDataSourcesInfo[otherId]
+        if (!otherInfo) continue
+        const otherDs = DataSourceManager.getInstance().getDataSource(otherId)
+        if (isAirportDataSource(otherDs, otherId)) {
+          if (otherInfo.selectedIds?.length === 1) return true
+          if (checkInfoQueries(otherInfo)) return true
+          const otherWhere = (otherDs as QueriableDataSource)?.getCurrentQueryParams?.()?.where
+          if (isFieldFilteredToSingleValue(otherWhere, triggerField)) return true
+        }
+      }
+    }
+
+    // 5. Cross-data source selected records fallback
+    const crossAirport = findAirportNameFromAllDataSources()
+    if (crossAirport) {
+      return true
+    }
+
+    // 6. Parcel feature selection fallback (for backward compatibility if someone clicks a parcel or chart bar)
     const selectedRecordIds = (ds as QueriableDataSource)?.getSelectedRecordIds?.() || dsInfo?.selectedIds || mainDsInfo?.selectedIds || []
     if (selectedRecordIds.length === 1) {
       return true
@@ -660,15 +728,19 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
   }, [
     rechartEnabled,
     dataSourceId,
+    mainDataSourceId,
     triggerField,
+    dsInfo?.widgetQueries,
     dsInfo?.filterVersion,
     dsInfo?.sourceVersion,
     dsInfo?.gdbVersion,
     dsInfo?.selectedIds,
+    mainDsInfo?.widgetQueries,
     mainDsInfo?.filterVersion,
     mainDsInfo?.sourceVersion,
     mainDsInfo?.gdbVersion,
-    mainDsInfo?.selectedIds
+    mainDsInfo?.selectedIds,
+    allDataSourcesInfo
   ])
 
   const [dbAirportName, setDbAirportName] = React.useState<string>('')
@@ -684,7 +756,15 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
     if (!ds) return
 
     const where = (ds as QueriableDataSource)?.getCurrentQueryParams?.()?.where
-    const rawVal = extractSingleFilterValue(where, triggerField) || extractSingleFilterValue(where)
+    let rawVal = extractSingleFilterValue(where, triggerField) || extractSingleFilterValue(where)
+    if (!rawVal) {
+      const wq = { ...(dsInfo?.widgetQueries || {}), ...(mainDsInfo?.widgetQueries || {}) }
+      for (const key of Object.keys(wq)) {
+        const qWhere = wq[key]?.where
+        rawVal = extractSingleFilterValue(qWhere, triggerField) || extractSingleFilterValue(qWhere)
+        if (rawVal) break
+      }
+    }
 
     // 1. If rawVal from filter is already an actual airport name (non-numeric), use it directly!
     if (rawVal && !/^\d+$/.test(rawVal.trim())) {
@@ -869,7 +949,7 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
     return () => {
       active = false
     }
-  }, [isSingleValue, dataSourceId, triggerField, dsInfo?.filterVersion, dsInfo?.selectedIds, mainDsInfo?.selectedIds])
+  }, [isSingleValue, dataSourceId, triggerField, dsInfo?.widgetQueries, dsInfo?.filterVersion, dsInfo?.selectedIds, mainDsInfo?.widgetQueries, mainDsInfo?.selectedIds])
 
   const [personStats, setPersonStats] = React.useState<Record<string, PersonStat>>({})
 
@@ -889,63 +969,34 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
       (rechartWebChart as any)?.dataSource?.query?.groupByFieldsForStatistics?.[0] ||
       'Client'
 
-    const queryFallback = () => {
-      ds.query({
-        where,
-        outFields: [clientField, idField, 'AreaF'],
-        pageSize: 2000,
-        returnGeometry: false
-      }).then(result => {
-        if (!active) return
-        const recs = result?.records ?? []
-        const counts: Record<string, { count: number, area: number, fullName: string }> = {}
-        for (const rec of recs) {
-          const data = rec.getData?.() || (rec as any).attributes || {}
-          const cVal = data[clientField] ?? data[clientField.toLowerCase()]
-          if (cVal != null) {
-            const fullName = String(cVal).trim()
-            const areaVal = Number(data.AreaF ?? data.areaf ?? 0)
-            const k = fullName.toLowerCase()
-            if (!counts[k]) {
-              counts[k] = { count: 0, area: 0, fullName }
-            }
-            counts[k].count += 1
-            counts[k].area += (!isNaN(areaVal) ? areaVal : 0)
-          }
+    let rawVal = extractSingleFilterValue(where, triggerField) || extractSingleFilterValue(where)
+    if (!rawVal) {
+      const wq = { ...(dsInfo?.widgetQueries || {}), ...(mainDsInfo?.widgetQueries || {}) }
+      for (const k of Object.keys(wq)) {
+        const v = extractSingleFilterValue(wq[k]?.where, triggerField) || extractSingleFilterValue(wq[k]?.where)
+        if (v) {
+          rawVal = v
+          break
         }
-        const statsMap: Record<string, PersonStat> = {}
-        for (const k of Object.keys(counts)) {
-          const item = counts[k]
-          statsMap[item.fullName] = item
-          statsMap[k] = item
-        }
-        setPersonStats(statsMap)
-      }).catch(() => {})
+      }
     }
 
-    // First attempt: Grouped statistics query directly on the layer
-    ds.query({
-      where,
-      groupByFieldsForStatistics: [clientField],
-      outStatistics: [
-        {
-          statisticType: 'count',
-          onStatisticField: idField,
-          outStatisticFieldName: 'parcel_count'
-        },
-        {
-          statisticType: 'sum',
-          onStatisticField: 'AreaF',
-          outStatisticFieldName: 'sum_area'
-        }
-      ],
-      pageSize: 1000,
-      returnGeometry: false
-    }).then(result => {
-      if (!active) return
-      const recs = result?.records ?? []
-      if (recs.length > 0) {
-        const statsMap: Record<string, PersonStat> = {}
+    let effectiveWhere = where
+    if (rawVal && !effectiveWhere.includes(rawVal)) {
+      const cleanField = triggerField || 'airportname'
+      const filterClause = /^\d+$/.test(rawVal) ? `${cleanField} = ${rawVal}` : `${cleanField} = '${rawVal.replace(/'/g, "''")}'`
+      effectiveWhere = effectiveWhere && effectiveWhere !== '1=1' ? `(${effectiveWhere}) AND (${filterClause})` : filterClause
+    }
+
+    // Resolve the area field from the rechart config (e.g. total_area) instead of hardcoding 'AreaF'
+    const rechartStats = (rechartWebChart as any)?.dataSource?.query?.outStatistics
+    const areaField = (Array.isArray(rechartStats) && rechartStats.find((s: any) =>
+      String(s?.statisticType || '').toLowerCase() === 'sum' && s?.onStatisticField
+    )?.onStatisticField) || 'AreaF'
+
+    const buildStatsMap = (recs: any[], fromGrouped: boolean): Record<string, PersonStat> => {
+      const statsMap: Record<string, PersonStat> = {}
+      if (fromGrouped) {
         for (const rec of recs) {
           const data = rec.getData?.() || (rec as any).attributes || {}
           const cVal = data[clientField] ?? data[clientField.toLowerCase()]
@@ -957,19 +1008,106 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
             statsMap[fullName.toLowerCase()] = { count, area, fullName }
           }
         }
-        setPersonStats(statsMap)
+      } else {
+        const counts: Record<string, { count: number, area: number, fullName: string }> = {}
+        for (const rec of recs) {
+          const data = rec.getData?.() || (rec as any).attributes || {}
+          const cVal = data[clientField] ?? data[clientField.toLowerCase()]
+          if (cVal != null) {
+            const fullName = String(cVal).trim()
+            const areaVal = Number(data[areaField] ?? data[areaField.toLowerCase()] ?? data.AreaF ?? data.areaf ?? 0)
+            const k = fullName.toLowerCase()
+            if (!counts[k]) {
+              counts[k] = { count: 0, area: 0, fullName }
+            }
+            counts[k].count += 1
+            counts[k].area += (!isNaN(areaVal) ? areaVal : 0)
+          }
+        }
+        for (const k of Object.keys(counts)) {
+          const item = counts[k]
+          statsMap[item.fullName] = item
+          statsMap[k] = item
+        }
+      }
+      return statsMap
+    }
+
+    const queryFallback = () => {
+      ds.query({
+        where: effectiveWhere,
+        outFields: ['*'],
+        pageSize: 2000,
+        returnGeometry: false
+      }).then(result => {
+        if (!active) return
+        const recs = result?.records ?? []
+        const statsMap = buildStatsMap(recs, false)
+        if (Object.keys(statsMap).length > 0) {
+          setPersonStats(statsMap)
+        }
+      }).catch(() => {})
+    }
+
+    // First attempt: Grouped statistics query directly on the layer
+    ds.query({
+      where: effectiveWhere,
+      groupByFieldsForStatistics: [clientField],
+      outStatistics: [
+        {
+          statisticType: 'count',
+          onStatisticField: idField,
+          outStatisticFieldName: 'parcel_count'
+        },
+        {
+          statisticType: 'sum',
+          onStatisticField: areaField,
+          outStatisticFieldName: 'sum_area'
+        }
+      ],
+      pageSize: 1000,
+      returnGeometry: false
+    }).then(result => {
+      if (!active) return
+      const recs = result?.records ?? []
+      if (recs.length > 0) {
+        setPersonStats(buildStatsMap(recs, true))
         return
       }
       queryFallback()
     }).catch(() => {
       if (!active) return
-      queryFallback()
+      // If full stats query fails (e.g. area field doesn't exist), try count-only
+      ds.query({
+        where: effectiveWhere,
+        groupByFieldsForStatistics: [clientField],
+        outStatistics: [
+          {
+            statisticType: 'count',
+            onStatisticField: idField,
+            outStatisticFieldName: 'parcel_count'
+          }
+        ],
+        pageSize: 1000,
+        returnGeometry: false
+      }).then(result => {
+        if (!active) return
+        const recs = result?.records ?? []
+        if (recs.length > 0) {
+          setPersonStats(buildStatsMap(recs, true))
+          return
+        }
+        queryFallback()
+      }).catch(() => {
+        if (!active) return
+        queryFallback()
+      })
     })
 
     return () => {
       active = false
     }
-  }, [isSingleValue, dataSourceId, triggerField, dsInfo?.filterVersion, dsInfo?.selectedIds, mainDsInfo?.selectedIds, rechartWebChart])
+  }, [isSingleValue, dataSourceId, triggerField, dsInfo?.widgetQueries, dsInfo?.filterVersion, dsInfo?.selectedIds, mainDsInfo?.widgetQueries, mainDsInfo?.selectedIds, rechartWebChart])
 
   const selectedAirportName = React.useMemo(() => {
     if (!isSingleValue) return ''
@@ -981,7 +1119,15 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
     if (dataSourceId) {
       const ds = DataSourceManager.getInstance().getDataSource(dataSourceId)
       const where = (ds as QueriableDataSource)?.getCurrentQueryParams?.()?.where
-      const fromWhere = extractSingleFilterValue(where, triggerField) || extractSingleFilterValue(where)
+      let fromWhere = extractSingleFilterValue(where, triggerField) || extractSingleFilterValue(where)
+      if (!fromWhere) {
+        const wq = { ...(dsInfo?.widgetQueries || {}), ...(mainDsInfo?.widgetQueries || {}) }
+        for (const key of Object.keys(wq)) {
+          const qWhere = wq[key]?.where
+          fromWhere = extractSingleFilterValue(qWhere, triggerField) || extractSingleFilterValue(qWhere)
+          if (fromWhere) break
+        }
+      }
 
       if (fromWhere) {
         if (!/^\d+$/.test(fromWhere.trim())) {
@@ -1019,7 +1165,7 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
     }
 
     return ''
-  }, [isSingleValue, dbAirportName, dataSourceId, triggerField])
+  }, [isSingleValue, dbAirportName, dataSourceId, triggerField, dsInfo?.widgetQueries, mainDsInfo?.widgetQueries])
 
   const configuredCount = React.useMemo(() => {
     const rechartCount = getConfiguredPeopleCount(rechartWebChart, rechartOptions, 0)
