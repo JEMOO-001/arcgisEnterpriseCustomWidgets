@@ -1,4 +1,5 @@
-import { React, ReactDOM, type DataSource, type QueriableDataSource } from 'jimu-core'
+import { React, ReactDOM, type DataSource, type QueriableDataSource, QueryScope } from 'jimu-core'
+import { loadArcGISJSAPIModules } from 'jimu-arcgis'
 
 export interface YearDataPoint {
   year: number
@@ -29,14 +30,31 @@ export interface PersonComparisonSummary {
 export interface PersonYearComparisonProps {
   personName: string
   airportName?: string
+  rawAirportValue?: string | number
   dataSource?: DataSource
   layer?: any
+  serviceUrl?: string
   clientField?: string
   airportField?: string
   yearField?: string
   areaField?: string
+  sampleAttributes?: Record<string, any>
   onBack?: () => void
   onClose?: () => void
+}
+
+/**
+ * Normalizes Arabic string for robust matching across Yaa/Alef-Maksura, Hamzas, and spaces.
+ */
+function normalizeArabic (s: any): string {
+  if (s == null) return ''
+  return String(s)
+    .trim()
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/[يى]/g, 'ي')
+    .replace(/ة/g, 'ه')
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
 }
 
 /**
@@ -67,12 +85,15 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
   const {
     personName,
     airportName = '',
+    rawAirportValue,
     dataSource,
     layer,
+    serviceUrl,
     clientField = 'Client',
     airportField = 'AirportName',
     yearField = 'Year',
     areaField = 'إجمالي المساحة بالفدان',
+    sampleAttributes,
     onBack,
     onClose
   } = props
@@ -95,60 +116,314 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
     setError(null)
 
     const queriableDs = dataSource as unknown as QueriableDataSource
-    const escapedPerson = personName.replace(/'/g, "''")
+    const cleanPerson = personName.trim()
+    const escapedPerson = cleanPerson.replace(/'/g, "''")
 
-    // Filter by person
-    const personClause = `(${clientField} = '${escapedPerson}' OR ${clientField} = N'${escapedPerson}')`
+    // 1. Gather all candidate field names from available metadata
+    const allCandidateKeys: string[] = []
+    if (sampleAttributes && typeof sampleAttributes === 'object') {
+      allCandidateKeys.push(...Object.keys(sampleAttributes))
+    }
+    if (Array.isArray(layer?.fields)) {
+      allCandidateKeys.push(...layer.fields.map((f: any) => f.name))
+    }
+    const schemaFields = (dataSource as any)?.getSchema?.()?.fields
+    if (schemaFields && typeof schemaFields === 'object') {
+      allCandidateKeys.push(...Object.keys(schemaFields))
+    }
+    const dsLayerFields = (dataSource as any)?.layer?.fields
+    if (Array.isArray(dsLayerFields)) {
+      allCandidateKeys.push(...dsLayerFields.map((f: any) => f.name))
+    }
 
-    // Filter by airport if provided
-    let whereClause = personClause
-    if (airportName && airportField) {
-      if (/^\d+$/.test(airportName.trim())) {
-        whereClause += ` AND (${airportField} = ${airportName.trim()})`
+    const uniqueKeys = Array.from(new Set(allCandidateKeys.filter(Boolean)))
+
+    const findField = (preferred: string[], pattern: RegExp, fallback: string): string => {
+      for (const pref of preferred) {
+        if (!pref) continue
+        const match = uniqueKeys.find(k => k.toLowerCase() === pref.toLowerCase())
+        if (match) return match
+      }
+      const matchPattern = uniqueKeys.find(k => pattern.test(k))
+      if (matchPattern) return matchPattern
+      return fallback
+    }
+
+    const actualClientField = findField([clientField, 'client', 'Client'], /^(?:client|person|owner|عميل|مالك|اسم_المالك|اسم)$/i, 'client')
+    const actualAirportField = findField([airportField, 'airportname', 'AirportName'], /^(?:airportname|airport_name|airport|اسم_المطار|مطار)$/i, 'airportname')
+    const actualYearField = findField([yearField, 'year', 'Year'], /^(?:year|year_|survey.*year|upload.*year|سنة_الرفع|سنة.*رفع|سنة)$/i, 'year')
+    const actualAreaField = findField([areaField, 'total_area', 'Total_Area', 'areaf', 'AreaF', 'إجمالي المساحة بالفدان'], /^(?:total_area|areaf|area_f|area|مساحة.*فدان|المساحة|مساحة)$/i, 'total_area')
+
+    console.log('>>> [PersonYearComparison] Resolved fields:', {
+      actualClientField,
+      actualAirportField,
+      actualYearField,
+      actualAreaField,
+      personName,
+      airportName,
+      rawAirportValue
+    })
+
+    // 2. Build Person WHERE clause with Arabic variations (clean standard SQL, no N prefix)
+    const nameVariations = new Set<string>()
+    nameVariations.add(escapedPerson)
+
+    if (escapedPerson.endsWith('ي')) {
+      nameVariations.add(escapedPerson.slice(0, -1) + 'ى')
+    } else if (escapedPerson.endsWith('ى')) {
+      nameVariations.add(escapedPerson.slice(0, -1) + 'ي')
+    }
+    if (escapedPerson.endsWith('ة')) {
+      nameVariations.add(escapedPerson.slice(0, -1) + 'ه')
+    } else if (escapedPerson.endsWith('ه')) {
+      nameVariations.add(escapedPerson.slice(0, -1) + 'ة')
+    }
+
+    const exactMatches = Array.from(nameVariations).map(v => `${actualClientField} = '${v}'`).join(' OR ')
+    const words = cleanPerson.split(/\s+/).filter(Boolean)
+    const rootSnippet = words.slice(0, Math.min(3, words.length)).join('%').replace(/[يى]$/, '').replace(/'/g, "''")
+    const likeClause = rootSnippet ? `${actualClientField} LIKE '%${rootSnippet}%'` : ''
+
+    const personClause = likeClause ? `(${exactMatches} OR ${likeClause})` : `(${exactMatches})`
+
+    // 3. Resolve Airport metadata (type & coded values domain)
+    const allFieldsList = Array.isArray(layer?.fields) ? layer.fields : (Array.isArray(dsLayerFields) ? dsLayerFields : [])
+    const airportFieldDef = allFieldsList.find((f: any) => f.name?.toLowerCase() === actualAirportField.toLowerCase())
+    const codedValues: any[] = airportFieldDef?.domain?.codedValues || []
+    const isAirportNumericType = airportFieldDef?.type && /integer|small-integer|number|oid|single|double/i.test(airportFieldDef.type)
+
+    // 4. Build Airport SQL clause (clean standard SQL)
+    let airportSql = ''
+    if (rawAirportValue != null) {
+      if (typeof rawAirportValue === 'number' || /^\d+$/.test(String(rawAirportValue).trim())) {
+        airportSql = `${actualAirportField} = ${Number(rawAirportValue)}`
       } else {
-        const escapedAirport = airportName.replace(/'/g, "''")
-        whereClause += ` AND (${airportField} = '${escapedAirport}' OR ${airportField} = N'${escapedAirport}')`
+        const escapedRaw = String(rawAirportValue).trim().replace(/'/g, "''")
+        airportSql = `${actualAirportField} = '${escapedRaw}'`
+      }
+    } else if (airportName && airportName.trim()) {
+      const cleanTarget = airportName.replace(/^مطار\s+/, '').trim()
+      if (/^\d+$/.test(cleanTarget)) {
+        airportSql = `${actualAirportField} = ${Number(cleanTarget)}`
+      } else {
+        let matchedCodedVal: any = null
+        if (codedValues.length) {
+          matchedCodedVal = codedValues.find((cv: any) => {
+            const cvName = String(cv.name || '').replace(/^مطار\s+/, '').trim().toLowerCase()
+            const targetLower = cleanTarget.toLowerCase()
+            return cvName === targetLower || cvName.includes(targetLower) || targetLower.includes(cvName)
+          })
+        }
+
+        if (matchedCodedVal != null) {
+          airportSql = typeof matchedCodedVal.code === 'number'
+            ? `${actualAirportField} = ${matchedCodedVal.code}`
+            : `${actualAirportField} = '${String(matchedCodedVal.code).replace(/'/g, "''")}'`
+        } else if (isAirportNumericType) {
+          // Numeric column without known code: omit from SQL to prevent SQL conversion error, filter in memory
+          airportSql = ''
+        } else {
+          const escapedAirport = cleanTarget.replace(/'/g, "''")
+          airportSql = `${actualAirportField} = '${escapedAirport}'`
+        }
       }
     }
 
+    // Direct Service URL resolution
+    const targetServiceUrl = (
+      serviceUrl ||
+      layer?.url ||
+      (dataSource as any)?.url ||
+      (dataSource as any)?.layer?.url ||
+      (dataSource as any)?.getDataSourceJson?.()?.url ||
+      ''
+    ).trim()
+
+    // 5. Query executor that bypasses Jimu's active runtime year filters
+    const fetchFeaturesFromService = async (whereStr: string): Promise<any[]> => {
+      console.log('>>> [PersonYearComparison] Executing query with where:', whereStr)
+
+      // Strategy 1: Jimu QueriableDataSource query with QueryScope.InConfigView (explicitly ignores runtime widgetQueries!)
+      if (queriableDs && typeof queriableDs.query === 'function') {
+        try {
+          const res = await queriableDs.query({
+            where: whereStr,
+            outFields: ['*'],
+            pageSize: 2000,
+            returnGeometry: false
+          } as any, { scope: QueryScope.InConfigView })
+          if (res?.records?.length > 0) {
+            console.log('>>> [PersonYearComparison] Strategy 1 (InConfigView) returned', res.records.length, 'records')
+            return res.records
+          }
+        } catch (e) {
+          console.warn('>>> [PersonYearComparison] Strategy 1 (InConfigView) failed:', e)
+        }
+      }
+
+      // Strategy 2: Direct ArcGIS Server REST query using esri/request with POST body (bypasses Jimu & IIS GET length limits)
+      if (targetServiceUrl) {
+        try {
+          const [esriRequest] = await loadArcGISJSAPIModules(['esri/request'])
+          const cleanUrl = targetServiceUrl.replace(/\/+$/, '')
+          const queryEndpoint = cleanUrl.endsWith('/query') ? cleanUrl : `${cleanUrl}/query`
+          const res = await esriRequest(queryEndpoint, {
+            method: 'post',
+            body: {
+              where: whereStr,
+              outFields: '*',
+              returnGeometry: 'false',
+              f: 'json'
+            },
+            responseType: 'json'
+          })
+          const features = res?.data?.features
+          if (Array.isArray(features) && features.length > 0) {
+            console.log('>>> [PersonYearComparison] Strategy 2 (esri/request POST) returned', features.length, 'features')
+            return features
+          }
+        } catch (e) {
+          console.warn('>>> [PersonYearComparison] Strategy 2 (esri/request POST) failed:', e)
+        }
+      }
+
+      // Strategy 3: Layer queryFeatures on the JS API FeatureLayer directly
+      if (layer && typeof layer.queryFeatures === 'function') {
+        try {
+          const q = typeof layer.createQuery === 'function' ? layer.createQuery() : {}
+          q.where = whereStr
+          q.outFields = ['*']
+          q.returnGeometry = false
+          const res = await layer.queryFeatures(q)
+          if (res?.features?.length > 0) {
+            console.log('>>> [PersonYearComparison] Strategy 3 (layer.queryFeatures) returned', res.features.length, 'features')
+            return res.features
+          }
+        } catch (e) {
+          console.warn('>>> [PersonYearComparison] Strategy 3 (layer.queryFeatures) failed:', e)
+        }
+      }
+
+      // Strategy 4: In-memory source records
+      if (queriableDs) {
+        try {
+          const memRecs = (typeof queriableDs.getRecords === 'function' ? queriableDs.getRecords() : (queriableDs as any).getSourceRecords?.()) ?? []
+          if (memRecs?.length) {
+            const targetNorm = normalizeArabic(personName)
+            const matches = memRecs.filter((r: any) => {
+              const d = (typeof r.getData === 'function' ? r.getData() : r.attributes) || {}
+              const c = d[actualClientField] ?? d[actualClientField.toLowerCase()] ?? d.client ?? d.Client
+              return c && normalizeArabic(c).includes(targetNorm)
+            })
+            if (matches.length) {
+              console.log('>>> [PersonYearComparison] Strategy 4 (in-memory) matched', matches.length, 'records')
+              return matches
+            }
+          }
+        } catch (e) {}
+      }
+
+      return []
+    }
+
+    // 6. In-memory airport validation helper
+    const matchesRecordAirport = (data: Record<string, any>): boolean => {
+      if (rawAirportValue == null && !airportName) return true
+
+      const recAirportVal = data[actualAirportField] ??
+        data[actualAirportField.toLowerCase()] ??
+        data.airportname ??
+        data.AirportName
+
+      if (recAirportVal == null) return true
+
+      if (rawAirportValue != null) {
+        if (String(recAirportVal).trim().toLowerCase() === String(rawAirportValue).trim().toLowerCase()) {
+          return true
+        }
+        if (Number(recAirportVal) === Number(rawAirportValue) && !isNaN(Number(rawAirportValue))) {
+          return true
+        }
+      }
+
+      if (airportName) {
+        const strRec = String(recAirportVal).trim().toLowerCase()
+        const cleanAirport = airportName.replace(/^مطار\s+/, '').trim().toLowerCase()
+        if (strRec.includes(cleanAirport) || cleanAirport.includes(strRec)) {
+          return true
+        }
+        if (codedValues.length) {
+          const cv = codedValues.find((c: any) => String(c.code).trim().toLowerCase() === strRec)
+          if (cv) {
+            const cvName = String(cv.name || '').replace(/^مطار\s+/, '').trim().toLowerCase()
+            if (cvName.includes(cleanAirport) || cleanAirport.includes(cvName)) {
+              return true
+            }
+          }
+        }
+      }
+
+      return false
+    }
+
+    // 7. Aggregation logic by survey year
     const processRecords = (records: any[]): PersonComparisonSummary | null => {
       const yearMap: Record<number, { count: number, area: number }> = {}
 
-      for (const rec of records) {
+      // Apply airport filter in memory if needed
+      let recordsToAggregate = records.filter(rec => {
+        const data = (typeof rec.getData === 'function' ? rec.getData() : rec.attributes) || rec || {}
+        return matchesRecordAirport(data)
+      })
+
+      // If strict filter eliminated all records but records exist, fall back to records
+      if (recordsToAggregate.length === 0 && records.length > 0) {
+        recordsToAggregate = records
+      }
+
+      for (const rec of recordsToAggregate) {
         const data = (typeof rec.getData === 'function' ? rec.getData() : rec.attributes) || rec || {}
 
-        // Extract year with case & alias fallbacks
-        let yrRaw = data[yearField] ?? data[yearField.toLowerCase()] ?? data[yearField.toUpperCase()]
+        // Extract year
+        let yrRaw = data[actualYearField] ?? data[actualYearField.toLowerCase()] ?? data[actualYearField.toUpperCase()]
         if (yrRaw == null) {
-          const yrKey = Object.keys(data).find(k => /^(?:year|year_|survey.*year|upload.*year|سنة.*رفع|سنة)$/i.test(k))
+          const yrKey = Object.keys(data).find(k => /^(?:year|year_|survey.*year|upload.*year|سنة_الرفع|سنة.*رفع|سنة)$/i.test(k))
           if (yrKey) yrRaw = data[yrKey]
+        }
+        if (yrRaw == null) {
+          const possibleYrKey = Object.keys(data).find(k => {
+            const val = Number(data[k])
+            return !isNaN(val) && val >= 2020 && val <= 2030 && !/(?:objectid|fid|id|code|area)/i.test(k)
+          })
+          if (possibleYrKey) yrRaw = data[possibleYrKey]
         }
         if (yrRaw == null) continue
         const yr = Number(yrRaw)
-        if (isNaN(yr) || yr < 1900 || yr > 2100) continue
+        if (isNaN(yr) || yr < 2020 || yr > 2100) continue
 
         // Extract area with alias fallbacks
         let areaVal = Number(
-          data[areaField] ??
-          data[areaField.toLowerCase()] ??
-          data[areaField.toUpperCase()] ??
-          data.AreaF ??
+          data[actualAreaField] ??
+          data[actualAreaField.toLowerCase()] ??
+          data[actualAreaField.toUpperCase()] ??
+          data.total_area ??
+          data.Total_Area ??
           data.areaf ??
-          data.AREAF ??
+          data.AreaF ??
           data['إجمالي المساحة بالفدان'] ??
           data.sum_area ??
-          data.total_area ??
+          data.sum_of_total_area ??
           0
         )
         if (isNaN(areaVal) || areaVal === 0) {
-          const areaKey = Object.keys(data).find(k => /(?:areaf|مساحة|area)/i.test(k) && !/(?:id|code|objectid|fid|shape__area)/i.test(k))
+          const areaKey = Object.keys(data).find(k => /(?:areaf|مساحة|total_area|area)/i.test(k) && !/(?:id|code|objectid|fid|shape__area|st_area)/i.test(k))
           if (areaKey && !isNaN(Number(data[areaKey]))) {
             areaVal = Number(data[areaKey])
           }
         }
         const validArea = !isNaN(areaVal) && areaVal > 0 ? areaVal : 0
 
-        // Extract count (if from grouped statistics)
+        // Extract count
         const countVal = Number(data.parcel_count ?? data.PARCEL_COUNT ?? data.count ?? 1)
 
         if (!yearMap[yr]) {
@@ -233,113 +508,36 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
       }
     }
 
-    const executeQuery = async (queryWhere: string): Promise<any[]> => {
-      // 1. Try QueriableDataSource remote query
-      if (queriableDs && typeof queriableDs.query === 'function') {
-        try {
-          const res = await queriableDs.query({
-            where: queryWhere,
-            outFields: ['*'],
-            pageSize: 2000,
-            returnGeometry: false
-          } as any)
-          if (res?.records?.length) {
-            return res.records
-          }
-        } catch (e) {}
-      }
-
-      // 2. Try in-memory records from DataSource
-      if (queriableDs) {
-        try {
-          const memRecs = (typeof queriableDs.getRecords === 'function' ? queriableDs.getRecords() : (queriableDs as any).getSourceRecords?.()) ?? []
-          if (memRecs?.length) {
-            const matches = memRecs.filter((r: any) => {
-              const d = r.getData?.() || r.attributes || {}
-              const c = d[clientField] ?? d[clientField.toLowerCase()] ?? d[clientField.toUpperCase()]
-              return c && String(c).trim().toLowerCase() === personName.trim().toLowerCase()
-            })
-            if (matches.length) return matches
-          }
-        } catch (e) {}
-      }
-
-      // 3. Try FeatureLayer queryFeatures
-      if (layer && typeof layer.queryFeatures === 'function') {
-        try {
-          const q = typeof layer.createQuery === 'function' ? layer.createQuery() : {}
-          q.where = queryWhere
-          q.outFields = ['*']
-          q.returnGeometry = false
-          const res = await layer.queryFeatures(q)
-          if (res?.features?.length) {
-            return res.features
-          }
-        } catch (e) {}
-      }
-
-      // 4. Try client-side graphics on layer source
-      if (layer?.source?.items?.length) {
-        try {
-          const items = layer.source.items
-          const matches = items.filter((g: any) => {
-            const d = g.attributes || {}
-            const c = d[clientField] ?? d[clientField.toLowerCase()] ?? d[clientField.toUpperCase()]
-            return c && String(c).trim().toLowerCase() === personName.trim().toLowerCase()
-          })
-          if (matches.length) return matches
-        } catch (e) {}
-      }
-
-      return []
-    }
-
+    // 8. Run Queries with airport scoping and fallback
     const runQueries = async () => {
-      // 1. Try grouped statistics query if dataSource is available
-      if (queriableDs && typeof queriableDs.query === 'function') {
-        try {
-          const res: any = await queriableDs.query({
-            where: whereClause,
-            groupByFieldsForStatistics: [yearField],
-            outStatistics: [
-              {
-                statisticType: 'count',
-                onStatisticField: yearField,
-                outStatisticFieldName: 'parcel_count'
-              },
-              {
-                statisticType: 'sum',
-                onStatisticField: areaField,
-                outStatisticFieldName: 'sum_area'
-              }
-            ],
-            orderByFields: [`${yearField} ASC`],
-            returnGeometry: false
-          } as any)
-          if (active && res?.records?.length > 0) {
-            const summaryResult = processRecords(res.records)
-            if (summaryResult) {
-              setSummary(summaryResult)
-              setLoading(false)
-              return
-            }
-          }
-        } catch (e) {}
+      // Query 1: with airport SQL if available
+      const whereWithAirport = airportSql ? `${personClause} AND (${airportSql})` : personClause
+      let records = await fetchFeaturesFromService(whereWithAirport)
+
+      // Query 2: fallback without airport SQL (filter airport in JS memory)
+      if ((!records || records.length === 0) && airportSql) {
+        console.log('>>> [PersonYearComparison] Zero records with airport SQL, trying personClause alone...')
+        records = await fetchFeaturesFromService(personClause)
       }
 
-      // 2. Try feature query with whereClause
-      let records = await executeQuery(whereClause)
-      if (!active) return
-
-      // 3. Fallback: if airport-scoped query returned 0, try personClause
-      if (!records.length && whereClause !== personClause) {
-        records = await executeQuery(personClause)
+      // Query 3: exact variations only
+      if (!records || records.length === 0) {
+        console.log('>>> [PersonYearComparison] Trying exact match query...')
+        records = await fetchFeaturesFromService(`(${exactMatches})`)
       }
+
+      // Query 4: Fallback to sampleAttributes if available
+      if ((!records || records.length === 0) && sampleAttributes && Object.keys(sampleAttributes).length > 0) {
+        console.log('>>> [PersonYearComparison] Falling back to sampleAttributes of clicked parcel')
+        records = [sampleAttributes]
+      }
+
       if (!active) return
 
-      if (records.length > 0) {
+      if (records && records.length > 0) {
         const summaryResult = processRecords(records)
         if (summaryResult) {
+          console.log('>>> [PersonYearComparison] Historical summary calculated successfully:', summaryResult)
           setSummary(summaryResult)
           setLoading(false)
           return
@@ -350,8 +548,9 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
       setLoading(false)
     }
 
-    runQueries().catch(() => {
+    runQueries().catch((err) => {
       if (!active) return
+      console.error('>>> [PersonYearComparison] Error fetching historical comparison data:', err)
       setError('تعذر تحميل بيانات مقارنة السنوات')
       setLoading(false)
     })
@@ -359,7 +558,19 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
     return () => {
       active = false
     }
-  }, [dataSource, layer, personName, airportName, clientField, airportField, yearField, areaField])
+  }, [
+    dataSource,
+    layer,
+    serviceUrl,
+    personName,
+    airportName,
+    rawAirportValue,
+    clientField,
+    airportField,
+    yearField,
+    areaField,
+    sampleAttributes
+  ])
 
   // SVG Chart Dimensions
   const svgWidth = 480

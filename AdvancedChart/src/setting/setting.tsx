@@ -339,24 +339,26 @@ const Setting = (props: SettingProps): React.ReactElement => {
                 </div>
               )}
               {rechartEnabled && (
-                <SettingRow label={translate('triggerField')} flow='wrap' className='mt-2'>
-                  <div className='w-100 text-secondary mb-1' style={{ fontSize: '12px' }}>
-                    {translate('triggerFieldTip')}
-                  </div>
-                  <FieldSelector
-                    type='category'
-                    useDataSources={propUseDataSources}
-                    fields={triggerFields}
-                    isMultiple={false}
-                    onChange={handleTriggerFieldChange}
-                  />
-                </SettingRow>
-                <SettingRow label={translate('zoomToParcel')} flow='no-wrap' className='mt-2'>
-                  <Switch
-                    checked={autoZoomToParcel}
-                    onChange={handleAutoZoomToggle}
-                  />
-                </SettingRow>
+                <>
+                  <SettingRow label={translate('triggerField')} flow='wrap' className='mt-2'>
+                    <div className='w-100 text-secondary mb-1' style={{ fontSize: '12px' }}>
+                      {translate('triggerFieldTip')}
+                    </div>
+                    <FieldSelector
+                      type='category'
+                      useDataSources={propUseDataSources}
+                      fields={triggerFields}
+                      isMultiple={false}
+                      onChange={handleTriggerFieldChange}
+                    />
+                  </SettingRow>
+                  <SettingRow label={translate('zoomToParcel')} flow='no-wrap' className='mt-2'>
+                    <Switch
+                      checked={autoZoomToParcel}
+                      onChange={handleAutoZoomToggle}
+                    />
+                  </SettingRow>
+                </>
               )}
             </SettingSection>
 

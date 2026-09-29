@@ -1,4 +1,4 @@
-import { React, type IMState, ReactRedux, lodash, MessageManager, DataRecordsSelectionChangeMessage, type DataSource, hooks, type DataRecord, type ImmutableArray, type QueriableDataSource, type FeatureLayerQueryParams } from 'jimu-core'
+import { React, type IMState, ReactRedux, lodash, MessageManager, DataRecordsSelectionChangeMessage, type DataSource, hooks, type DataRecord, type ImmutableArray, type QueriableDataSource, type FeatureLayerQueryParams, QueryScope } from 'jimu-core'
 import { type SelectionData, SelectionSource, getSplitByField, type WebChartDataItem } from 'jimu-ui/advanced/chart'
 import { MapViewManager, zoomToUtils, loadArcGISJSAPIModules } from 'jimu-arcgis'
 import { type WebChartSeries, type ComparisonOptions } from '../../../config'
@@ -228,39 +228,33 @@ export const extractExtentFromRecords = (
   }
 
   for (const r of records) {
-    const feat = (r as any)?.feature
+    let feat = (r as any)?.feature
+    const geom = (typeof r.getGeometry === 'function' ? r.getGeometry() : (r as any)?.geometry) || feat?.geometry
+    const attrs = (typeof r.getData === 'function' ? r.getData() : (r as any)?.attributes) || feat?.attributes || {}
+
+    if (!feat && (geom || attrs)) {
+      feat = { attributes: attrs, geometry: geom }
+    }
+
     if (feat) {
       graphics.push(feat)
-      if (feat.geometry) {
+      if (geom) {
+        geometries.push(geom)
+        inspectGeom(geom)
+      } else if (feat.geometry) {
         geometries.push(feat.geometry)
         inspectGeom(feat.geometry)
       }
     }
 
-    if (typeof r.getGeometry === 'function') {
-      try {
-        const g = r.getGeometry()
-        if (g) {
-          geometries.push(g)
-          inspectGeom(g)
-        }
-      } catch (e) {}
-    }
-
     if (typeof (r as any).getRawGeometry === 'function') {
       try {
         const rg = (r as any).getRawGeometry()
-        if (rg) {
+        if (rg && !geom) {
           geometries.push(rg)
           inspectGeom(rg)
         }
       } catch (e) {}
-    }
-
-    const plain = (r as any)?.geometry
-    if (plain) {
-      geometries.push(plain)
-      inspectGeom(plain)
     }
   }
 
@@ -411,7 +405,7 @@ export const injectCompareButtonIntoPopupDOM = (
       const targetDoc = view?.container?.ownerDocument || view?.popup?.container?.ownerDocument || document
       const popupDom = (view.popup.container as HTMLElement) || (targetDoc.querySelector('.esri-popup') as HTMLElement) || (document.querySelector('.esri-popup') as HTMLElement)
       if (!popupDom) {
-        if (retryCount < 8) {
+        if (retryCount < 15) {
           setTimeout(() => injectCompareButtonIntoPopupDOM(view, originDataSource, comparisonOptions, retryCount + 1, selectedFeature), 150)
         }
         return
@@ -419,7 +413,7 @@ export const injectCompareButtonIntoPopupDOM = (
 
       const contentEl = (popupDom.querySelector('.esri-popup__content') as HTMLElement) || (targetDoc.querySelector('.esri-popup__content') as HTMLElement)
       if (!contentEl) {
-        if (retryCount < 8) {
+        if (retryCount < 15) {
           setTimeout(() => injectCompareButtonIntoPopupDOM(view, originDataSource, comparisonOptions, retryCount + 1, selectedFeature), 150)
         }
         return
@@ -433,10 +427,21 @@ export const injectCompareButtonIntoPopupDOM = (
       // Ensure click delegation is active
       setupPopupComparisonHandler(view, originDataSource, comparisonOptions)
 
+      // Attach MutationObserver to contentEl so that if Esri re-renders popup contents,
+      // the compare button is automatically re-injected
+      if (!(contentEl as any)._pycObserver) {
+        try {
+          const obs = new MutationObserver(() => {
+            if (!contentEl.querySelector('.pyc-incontent-banner') && !popupDom.querySelector('.pyc-mount-wrapper')) {
+              injectCompareButtonIntoPopupDOM(view, originDataSource, comparisonOptions, 0, selectedFeature)
+            }
+          })
+          obs.observe(contentEl, { childList: true, subtree: false })
+          ;(contentEl as any)._pycObserver = obs
+        } catch (_) {}
+      }
+
       // CRITICAL: Use the popup element's own ownerDocument for createElement.
-      // In Experience Builder, the popup may live in an iframe. Elements created
-      // with the widget's `document` render visually when cross-adopted, but their
-      // event handlers are bound to the wrong event loop and silently never fire.
       const popupOwnerDoc = contentEl.ownerDocument || targetDoc || document
 
       const banner = popupOwnerDoc.createElement('div')
@@ -801,16 +806,22 @@ export const openComparisonPopup = (
     personName = 'المالك'
   }
 
-  // 2. Resolve Airport Name
+  // 2. Resolve Airport Name and Raw Value
   const airportField = comparisonOptions?.airportField || 'AirportName'
+  const rawAirportValue =
+    attrs[airportField] ??
+    attrs[airportField.toLowerCase()] ??
+    attrs.airportname ??
+    attrs.AirportName ??
+    attrs.AIRPORTNAME
+
   const airportName = comparisonOptions?.selectedAirportName ||
-    attrs[airportField] ||
-    attrs[airportField.toLowerCase()] ||
+    (rawAirportValue != null ? String(rawAirportValue) : '') ||
     attrs.AirportName ||
     attrs.airportname ||
     ''
 
-  console.log('>>> [AdvancedChart] Resolved comparison target:', { personName, airportName, clientField, airportField })
+  console.log('>>> [AdvancedChart] Resolved comparison target:', { personName, airportName, rawAirportValue, clientField, airportField })
 
   // Target DOM container: .esri-popup__main-container (or popupDom)
   const mainContainer = (popupDom?.querySelector('.esri-popup__main-container') as HTMLElement) || popupDom
@@ -933,6 +944,14 @@ export const openComparisonPopup = (
     })
   }
 
+  const serviceUrl =
+    targetLayer?.url ||
+    (originDataSource as any)?.url ||
+    (originDataSource as any)?.layer?.url ||
+    (originDataSource as any)?.getDataSourceJson?.()?.url ||
+    (activeFeature?.layer as any)?.url ||
+    ''
+
   // 3. Append the overlay container into mainContainer FIRST
   mainContainer.appendChild(mountContainer)
   console.log('>>> [AdvancedChart] Appended mountContainer to mainContainer successfully')
@@ -941,12 +960,15 @@ export const openComparisonPopup = (
   unmountCallback = mountPersonYearComparison(mountContainer, {
     personName: String(personName),
     airportName: String(airportName),
+    rawAirportValue,
     dataSource: originDataSource,
     layer: targetLayer,
+    serviceUrl,
     clientField,
     airportField,
     yearField: comparisonOptions?.yearField || 'Year',
     areaField: comparisonOptions?.areaField || 'إجمالي المساحة بالفدان',
+    sampleAttributes: attrs,
     onBack: handleBack,
     onClose: handleClose
   })
@@ -998,7 +1020,8 @@ export const zoomMapToRecords = async (
   categoryField?: string,
   originDataSource?: DataSource,
   openPopup: boolean = true,
-  comparisonOptions?: ComparisonOptions
+  comparisonOptions?: ComparisonOptions,
+  autoZoomToParcel: boolean = true
 ): Promise<void> => {
   try {
     if (!records || !records.length) {
@@ -1031,7 +1054,7 @@ export const zoomMapToRecords = async (
 
     for (const jimuMapView of targetViews) {
       const view = jimuMapView?.view
-      if (!view || typeof view.goTo !== 'function') continue
+      if (!view) continue
 
       const targetSR = extent?.spatialReference || view.spatialReference
 
@@ -1108,39 +1131,41 @@ export const zoomMapToRecords = async (
         return graphic
       })
 
-      // 2. Physically zoom in to the new parcel
-      try {
-        if (isPoint && extent) {
-          await view.goTo({
-            center: centerPoint,
-            spatialReference: targetSR,
-            scale: 2500,
-            zoom: 17
-          }, { duration: 1200 })
-        } else if (extent && ExtentClass) {
-          const esriExtent = new ExtentClass({
-            xmin: extent.xmin,
-            ymin: extent.ymin,
-            xmax: extent.xmax,
-            ymax: extent.ymax,
-            spatialReference: targetSR
-          })
-          const expanded = typeof esriExtent.expand === 'function' ? esriExtent.expand(1.3) : esriExtent
-          await view.goTo(expanded, { duration: 1200 })
-        } else if (popupGraphics.length) {
-          await view.goTo(popupGraphics.length === 1 ? popupGraphics[0] : popupGraphics, { duration: 1200 })
-        } else if (extent) {
-          await view.goTo(extent, { duration: 1200 })
-        } else if (geometries.length) {
-          await view.goTo(geometries.length === 1 ? geometries[0] : geometries, { duration: 1200 })
-        }
-      } catch (zoomErr) {
-        if (popupGraphics.length && zoomToUtils?.zoomTo) {
-          try {
-            await zoomToUtils.zoomTo(view, popupGraphics, {
-              scale: isPoint ? 2500 : undefined
+      // 2. Physically zoom in to the new parcel FIRST (if autoZoomToParcel is true)
+      if (autoZoomToParcel && typeof view.goTo === 'function') {
+        try {
+          if (isPoint && extent) {
+            await view.goTo({
+              center: centerPoint,
+              spatialReference: targetSR,
+              scale: 2500,
+              zoom: 17
+            }, { duration: 1000 })
+          } else if (extent && ExtentClass) {
+            const esriExtent = new ExtentClass({
+              xmin: extent.xmin,
+              ymin: extent.ymin,
+              xmax: extent.xmax,
+              ymax: extent.ymax,
+              spatialReference: targetSR
             })
-          } catch (e) {}
+            const expanded = typeof esriExtent.expand === 'function' ? esriExtent.expand(1.3) : esriExtent
+            await view.goTo(expanded, { duration: 1000 })
+          } else if (popupGraphics.length) {
+            await view.goTo(popupGraphics.length === 1 ? popupGraphics[0] : popupGraphics, { duration: 1000 })
+          } else if (extent) {
+            await view.goTo(extent, { duration: 1000 })
+          } else if (geometries.length) {
+            await view.goTo(geometries.length === 1 ? geometries[0] : geometries, { duration: 1000 })
+          }
+        } catch (zoomErr) {
+          if (popupGraphics.length && zoomToUtils?.zoomTo) {
+            try {
+              await zoomToUtils.zoomTo(view, popupGraphics, {
+                scale: isPoint ? 2500 : undefined
+              })
+            } catch (e) {}
+          }
         }
       }
 
@@ -1163,13 +1188,12 @@ export const zoomMapToRecords = async (
         }
       } catch (highlightErr) {}
 
-      // 5. Open pop-up on the newly selected parcel.
-      // Skipped when the clicked data point is an aggregate of several features,
-      // because the pop-up would then describe whichever one the query returned first.
+      // 5. Open pop-up on the newly selected parcel (AFTER camera positioning completes)
       try {
         if (openPopup && popupGraphics.length) {
-          const popupLocation = centerPoint || (popupGraphics[0]?.geometry?.type === 'point' ? popupGraphics[0].geometry : null)
+          const popupLocation = centerPoint || (popupGraphics[0]?.geometry?.type === 'point' ? popupGraphics[0].geometry : (popupGraphics[0]?.geometry?.extent?.center || null))
           if (view.popup) {
+            try { view.popup.autoCloseEnabled = false } catch (_) {}
             view.popup.open({
               features: popupGraphics,
               location: popupLocation
@@ -1194,8 +1218,88 @@ export const zoomMapToRecords = async (
 }
 
 /**
+ * Queries all parcel records for the specified person from originDataSource,
+ * zooms the map to them, highlights them, opens the popup, and attaches the Compare button.
+ */
+export const selectAndZoomToPerson = async (
+  personName: string | number,
+  activeCategoryField: string,
+  originDataSource?: DataSource,
+  autoZoomToParcel: boolean = true,
+  openSelectionPopup: boolean = true,
+  comparisonOptions?: ComparisonOptions
+): Promise<void> => {
+  if (!originDataSource || personName == null || personName === '') return
+
+  // 1. Resolve actual field name from originDataSource schema
+  const schemaFields = (originDataSource as any)?.getSchema?.()?.fields || {}
+  const fieldNames = Object.keys(schemaFields)
+  let actualField = activeCategoryField || 'Client'
+  if (fieldNames.length) {
+    const match = fieldNames.find(f => f.toLowerCase() === actualField.toLowerCase())
+    if (match) {
+      actualField = match
+    } else if (comparisonOptions?.clientField) {
+      const matchClient = fieldNames.find(f => f.toLowerCase() === comparisonOptions.clientField!.toLowerCase())
+      if (matchClient) actualField = matchClient
+    } else {
+      const candidateKey = fieldNames.find(f =>
+        /(?:client|person|owner|عميل|مالك|اسم)/i.test(f) &&
+        !/(?:id|code|airport|مطار|area|مساحة|year|سنة)/i.test(f)
+      )
+      if (candidateKey) actualField = candidateKey
+    }
+  }
+
+  const strVal = String(personName).trim().replace(/'/g, "''")
+  const queryWhere = (typeof personName === 'number')
+    ? `${actualField} = ${personName}`
+    : `${actualField} = '${strVal}'`
+
+  const queryParams: FeatureLayerQueryParams = {
+    where: queryWhere,
+    returnGeometry: true,
+    outFields: ['*']
+  }
+
+  const queriableDs = originDataSource as QueriableDataSource
+  if (typeof queriableDs?.query !== 'function') return
+
+  try {
+    const result = await queriableDs.query(queryParams, { scope: QueryScope.InConfigView })
+    let parcelRecords = result?.records ?? []
+
+    // If remote query returned 0 records, try searching in-memory records from originDataSource
+    if (!parcelRecords.length && typeof queriableDs.getRecords === 'function') {
+      const memRecs = queriableDs.getRecords() || []
+      parcelRecords = memRecs.filter((r: any) => {
+        const d = (typeof r.getData === 'function' ? r.getData() : r.attributes) || {}
+        const val = d[actualField] ?? d[actualField.toLowerCase()] ?? d.client ?? d.Client
+        return val != null && String(val).trim().toLowerCase() === String(personName).trim().toLowerCase()
+      })
+    }
+
+    if (parcelRecords.length) {
+      // Synchronize selection on originDataSource
+      try {
+        const ids = parcelRecords.map((r: any) => r.getId?.() || r.id).filter(Boolean)
+        if (ids.length && typeof originDataSource.selectRecordsByIds === 'function') {
+          isInternalSelectionRef.current = true
+          originDataSource.selectRecordsByIds(ids)
+          setTimeout(() => { isInternalSelectionRef.current = false }, 1000)
+        }
+      } catch (e) {}
+
+      await zoomMapToRecords(parcelRecords, actualField, originDataSource, openSelectionPopup, comparisonOptions, autoZoomToParcel)
+    }
+  } catch (err) {
+    console.error('Failed to query parcel records for person:', err)
+  }
+}
+
+/**
  * Keep the selection of chart and output data source, publish message when selection changes.
- * When a person is clicked, queries their parcels from originDataSource, selects them, and zooms the map.
+ * Supports consistent popup and yearly comparison whether a person is selected from the chart or the list.
  */
 const useSelection = (
   widgetId: string,
@@ -1211,6 +1315,13 @@ const useSelection = (
 ): [SelectionData, (...args: any[]) => any] => {
   const numberFieldsRef = hooks.useLatest(numberFields)
   const preSelectedIdsRef = React.useRef<string[]>()
+  const isInternalSelectionRef = React.useRef(false)
+  const lastProcessedOriginIdsRef = React.useRef<string[]>([])
+  const lastProcessedPersonRef = React.useRef<string>('')
+  const lastProcessedTimeRef = React.useRef<number>(0)
+
+  const activeCategoryField = categoryField || (series?.[0] as any)?.x || 'Client'
+
   const handleSelectionChange = hooks.useEventCallback((e) => {
     const sourceRecords = outputDataSource?.getSourceRecords()
     if (!sourceRecords?.length) return
@@ -1226,6 +1337,8 @@ const useSelection = (
     // If selection is cleared or empty
     if (selectionSource === SelectionSource.ClearSelection || !e.detail.selectionItems?.length) {
       preSelectedIdsRef.current = []
+      lastProcessedOriginIdsRef.current = []
+      lastProcessedPersonRef.current = ''
       outputDataSource?.selectRecordsByIds([])
       clearPreviousMapSelection()
       return
@@ -1246,7 +1359,6 @@ const useSelection = (
 
     // Handle origin parcel records for map selection and zoom
     if (originDataSource) {
-      const activeCategoryField = categoryField || (series?.[0] as any)?.x
       const personValues: any[] = selectionItems.map(item => {
         if (activeCategoryField && typeof item[activeCategoryField] !== 'undefined') {
           return item[activeCategoryField]
@@ -1264,50 +1376,31 @@ const useSelection = (
         return item.name ?? item.x
       }).filter(v => v !== undefined && v !== null && v !== '')
 
-      if (personValues.length && activeCategoryField) {
-        const clauses = personValues.map(v => {
-          if (typeof v === 'number') {
-            return `${activeCategoryField} = ${v}`
-          }
-          const strVal = String(v).replace(/'/g, "''")
-          return `(${activeCategoryField} = '${strVal}' OR ${activeCategoryField} = N'${strVal}')`
-        })
-        const queryWhere = clauses.join(' OR ')
+      if (personValues.length) {
+        const pVal = personValues[0]
+        lastProcessedPersonRef.current = String(pVal).trim()
+        lastProcessedTimeRef.current = Date.now()
+        isInternalSelectionRef.current = true
+        setTimeout(() => { isInternalSelectionRef.current = false }, 1000)
 
-        const queryParams: FeatureLayerQueryParams = {
-          where: queryWhere,
-          returnGeometry: true,
-          outFields: ['*']
-        }
-
-        const queriableDs = originDataSource as QueriableDataSource
-        if (typeof queriableDs?.query === 'function') {
-          queriableDs.query(queryParams).then((result) => {
-            const parcelRecords = result?.records ?? []
-            if (parcelRecords.length) {
-              // Automatically zoom map in on the parcel(s), and display the pop-up
-              // only when the clicked point maps to individual records.
-              if (autoZoomToParcel) {
-                zoomMapToRecords(parcelRecords, activeCategoryField, originDataSource, openSelectionPopup, comparisonOptions)
-              }
-            } else {
-              clearPreviousMapSelection()
-            }
-          }).catch(err => {
-            console.error('Failed to query parcel records for person:', err)
-            clearPreviousMapSelection()
-          })
-          return
-        }
+        selectAndZoomToPerson(
+          pVal,
+          activeCategoryField,
+          originDataSource,
+          autoZoomToParcel,
+          openSelectionPopup,
+          comparisonOptions
+        )
       }
     }
 
-    // Default publish if no originDataSource
+    // Also publish message for other listening widgets
     MessageManager.getInstance().publishMessage(
       new DataRecordsSelectionChangeMessage(widgetId, selectedRecords)
     )
   })
 
+  // Watch chart's outputDataSource selection
   const originalSelectedIds = ReactRedux.useSelector((state: IMState) => state.dataSourcesInfo?.[outputDataSource?.id]?.selectedIds)
   const [selectionItems, setSelectionItems] = React.useState<WebChartDataItem[]>()
 
@@ -1329,6 +1422,148 @@ const useSelection = (
     setSelectionItems(selectionItems)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [originalSelectedIds])
+
+  // Watch originDataSource selection from EXTERNAL widgets (e.g. List widget showing people in the airport)
+  const originSelectedIds = ReactRedux.useSelector((state: IMState) => {
+    const dsId = originDataSource?.id
+    if (!dsId) return undefined
+    const info = state.dataSourcesInfo?.[dsId]
+    if (info?.selectedIds?.length) return info.selectedIds
+
+    const mainId = (originDataSource as any)?.mainDataSourceId
+    if (mainId && mainId !== dsId) {
+      const mainInfo = state.dataSourcesInfo?.[mainId]
+      if (mainInfo?.selectedIds?.length) return mainInfo.selectedIds
+    }
+
+    // Check dataViews or related layer dataSources in the same root
+    const allInfos = state.dataSourcesInfo || {}
+    for (const key of Object.keys(allInfos)) {
+      if (key !== dsId && (key.startsWith(dsId) || (mainId && key.startsWith(mainId)))) {
+        if (allInfos[key]?.selectedIds?.length) {
+          return allInfos[key].selectedIds
+        }
+      }
+    }
+    return undefined
+  })
+
+  // Handle external selection change (from List widget)
+  const handleExternalOriginSelection = hooks.useEventCallback(async (selectedIds: string[]) => {
+    if (!selectedIds?.length || !originDataSource) return
+    if (isInternalSelectionRef.current) return
+
+    try {
+      const clientField = comparisonOptions?.clientField || 'Client'
+
+      // 1. Get the selected record from memory or fetch from data source
+      let rec: any = null
+      const inMemRecords = originDataSource.getSelectedRecords?.() || []
+      rec = inMemRecords.find((r: any) => selectedIds.includes(r.getId?.())) || inMemRecords[0]
+
+      if (!rec && typeof originDataSource.getRecordById === 'function') {
+        rec = originDataSource.getRecordById(selectedIds[0])
+      }
+
+      if (!rec || !rec.getData?.()) {
+        const queriableDs = originDataSource as QueriableDataSource
+        if (typeof queriableDs?.query === 'function') {
+          const idField = (originDataSource as any).getIdField?.() || 'OBJECTID'
+          const idClauses = selectedIds.map(id => /^\d+$/.test(String(id).trim()) ? `${idField} = ${id}` : `${idField} = '${id}'`).join(' OR ')
+          try {
+            const res = await queriableDs.query({ where: idClauses, outFields: ['*'], returnGeometry: true })
+            if (res?.records?.length) {
+              rec = res.records[0]
+            }
+          } catch (e) {}
+        }
+      }
+
+      if (!rec) return
+
+      const data = (typeof rec.getData === 'function' ? rec.getData() : rec.attributes) || rec || {}
+
+      // 2. Extract person name from record attributes
+      let personName =
+        data[activeCategoryField] ??
+        data[clientField] ??
+        data[activeCategoryField?.toLowerCase()] ??
+        data[clientField?.toLowerCase()] ??
+        data.Client ??
+        data.client ??
+        data.CLIENT ??
+        data.owner ??
+        data.Owner ??
+        data.person ??
+        data.Person ??
+        data['الاسم'] ??
+        data['اسم العميل'] ??
+        data['المالك']
+
+      if (!personName) {
+        const candidateKey = Object.keys(data).find(k =>
+          /(?:client|person|owner|عميل|مالك|اسم)/i.test(k) &&
+          !/(?:id|code|airport|مطار|area|مساحة|year|سنة|status|حالة)/i.test(k)
+        )
+        if (candidateKey && typeof data[candidateKey] === 'string' && data[candidateKey].trim()) {
+          personName = data[candidateKey].trim()
+        }
+      }
+
+      if (!personName) return
+      personName = String(personName).trim()
+
+      const now = Date.now()
+      if (personName === lastProcessedPersonRef.current && now - lastProcessedTimeRef.current < 500) {
+        return
+      }
+      lastProcessedPersonRef.current = personName
+      lastProcessedTimeRef.current = now
+
+      isInternalSelectionRef.current = true
+      setTimeout(() => { isInternalSelectionRef.current = false }, 1000)
+
+      // 3. Zoom map to all parcels for this person and open popup with Compare button
+      await selectAndZoomToPerson(
+        personName,
+        activeCategoryField,
+        originDataSource,
+        autoZoomToParcel,
+        openSelectionPopup,
+        comparisonOptions
+      )
+
+      // 4. Synchronize chart selection so the corresponding bar is highlighted
+      if (outputDataSource) {
+        const sourceRecords = outputDataSource.getSourceRecords?.() || []
+        const matchedRecords = sourceRecords.filter((r: any) => {
+          const d = r.getData?.() || {}
+          const name = d[activeCategoryField] ?? d[activeCategoryField + '_original'] ?? d.name ?? d.x
+          return name != null && String(name).trim().toLowerCase() === personName.toLowerCase()
+        })
+        if (matchedRecords.length) {
+          const outIds = matchedRecords.map((r: any) => r.getId())
+          preSelectedIdsRef.current = outIds
+          outputDataSource.selectRecordsByIds(outIds)
+        }
+      }
+    } catch (err) {
+      console.error('>>> [AdvancedChart] Error handling origin selection from list:', err)
+    } finally {
+      setTimeout(() => { isInternalSelectionRef.current = false }, 1000)
+    }
+  })
+
+  React.useEffect(() => {
+    if (isInternalSelectionRef.current) return
+    if (!originDataSource || !originSelectedIds?.length) return
+
+    const mutableOriginIds = originSelectedIds.asMutable ? originSelectedIds.asMutable() : Array.from(originSelectedIds)
+    if (lodash.isDeepEqual(mutableOriginIds, lastProcessedOriginIdsRef.current)) return
+    lastProcessedOriginIdsRef.current = mutableOriginIds
+
+    handleExternalOriginSelection(mutableOriginIds)
+  }, [originSelectedIds, originDataSource, handleExternalOriginSelection])
 
   React.useEffect(() => {
     registerGlobalPopupComparisonHandler(originDataSource, comparisonOptions)
