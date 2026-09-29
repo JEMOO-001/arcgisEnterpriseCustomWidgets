@@ -70,6 +70,17 @@ export interface ChartComponentProps {
 
   /** Custom tooltip formatter passed to chart components */
   tooltipFormatter?: (params: any) => string
+
+  /** Options for year-over-year parcel comparison in popup */
+  comparisonOptions?: ComparisonOptions
+}
+
+export interface ComparisonOptions {
+  selectedAirportName?: string
+  airportField?: string
+  clientField?: string
+  yearField?: string
+  areaField?: string
 }
 
 export interface DrilldownOptions {

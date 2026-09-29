@@ -1,8 +1,9 @@
 import { React, ReactRedux, DataSourceManager, Immutable, type ImmutableObject, type UseDataSource, type WidgetInitDragCallback, type QueriableDataSource, type IMState, type DataSource, dataSourceUtils } from 'jimu-core'
-import { type ChartComponentProps, type ChartTools, type IWebChart, type TemplateType, type RechartConfig } from '../../config'
+import { type ChartComponentProps, type ChartTools, type IWebChart, type TemplateType, type RechartConfig, type ComparisonOptions } from '../../config'
 import { getChartText, DefaultTitleSize, DefaultTitleColor } from '../../utils/default'
 import { ChartRuntimeStateProvider } from '../state'
 import Chart from './index'
+import { registerGlobalPopupComparisonHandler } from './utils/use-selection'
 
 function escapeRegex (str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -1229,6 +1230,35 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
     return buildArabicTooltipHTML(displayName, statVal, parcelCount, isSingle)
   }, [])
 
+  const resolvedClientField = React.useMemo(() => {
+    return (rechartWebChart as any)?.series?.[0]?.x ||
+      (rechartWebChart as any)?.dataSource?.query?.groupByFieldsForStatistics?.[0] ||
+      (webChart as any)?.series?.[0]?.x ||
+      'Client'
+  }, [rechartWebChart, webChart])
+
+  const resolvedAreaField = React.useMemo(() => {
+    const rechartStats = (rechartWebChart as any)?.dataSource?.query?.outStatistics
+    return (Array.isArray(rechartStats) && rechartStats.find((s: any) =>
+      String(s?.statisticType || '').toLowerCase() === 'sum' && s?.onStatisticField
+    )?.onStatisticField) || 'AreaF'
+  }, [rechartWebChart])
+
+  const comparisonOptions: ComparisonOptions = React.useMemo(() => {
+    return {
+      selectedAirportName,
+      airportField: triggerField || 'AirportName',
+      clientField: resolvedClientField,
+      yearField: 'Year',
+      areaField: resolvedAreaField
+    }
+  }, [selectedAirportName, triggerField, resolvedClientField, resolvedAreaField])
+
+  React.useEffect(() => {
+    const ds = dataSourceId ? DataSourceManager.getInstance().getDataSource(dataSourceId) : undefined
+    registerGlobalPopupComparisonHandler(ds, comparisonOptions)
+  }, [dataSourceId, comparisonOptions])
+
   const activeTools = isSingleValue ? rechartTools : tools
   const activeOptions = React.useMemo(() => {
     const baseOptions = isSingleValue ? rechartOptions : options
@@ -1239,13 +1269,15 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
       return (baseOptions as any)
         .set('tooltipFormatter', handleTooltipFormat)
         .set('openSelectionPopup', openSelectionPopup)
+        .set('comparisonOptions', comparisonOptions)
     }
     return {
       ...(baseOptions || {}),
       tooltipFormatter: handleTooltipFormat,
-      openSelectionPopup
+      openSelectionPopup,
+      comparisonOptions
     }
-  }, [isSingleValue, rechartOptions, options, handleTooltipFormat])
+  }, [isSingleValue, rechartOptions, options, handleTooltipFormat, comparisonOptions])
   const activeTemplateType = isSingleValue ? rechartTemplateType : defaultTemplateType
 
   return (

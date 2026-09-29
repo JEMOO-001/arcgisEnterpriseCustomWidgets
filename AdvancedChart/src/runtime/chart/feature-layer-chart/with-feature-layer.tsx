@@ -233,7 +233,8 @@ function WithFeatureLayerChart (props: WithFeatureLayerChartProps): React.ReactE
     dataSource,
     categoryField,
     options?.autoZoomToParcel ?? true,
-    options?.openSelectionPopup ?? true
+    options?.openSelectionPopup ?? true,
+    options?.comparisonOptions
   )
 
   return (
