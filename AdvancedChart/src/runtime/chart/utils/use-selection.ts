@@ -1,7 +1,7 @@
 import { React, type IMState, ReactRedux, lodash, MessageManager, DataRecordsSelectionChangeMessage, type DataSource, hooks, type DataRecord, type ImmutableArray, type QueriableDataSource, type FeatureLayerQueryParams, QueryScope } from 'jimu-core'
 import { type SelectionData, SelectionSource, getSplitByField, type WebChartDataItem } from 'jimu-ui/advanced/chart'
 import { MapViewManager, zoomToUtils, loadArcGISJSAPIModules } from 'jimu-arcgis'
-import { type WebChartSeries, type ComparisonOptions } from '../../../config'
+import { type WebChartSeries, type ComparisonContext } from '../../../config'
 import convertDataItemsFromUpperCase from './convert-data-items-from-uppercase'
 import { mountPersonYearComparison } from '../components/PersonYearComparison'
 
@@ -386,168 +386,7 @@ const flashGraphicsOnView = (view: any, graphics: any[], GraphicClass?: any): vo
   doFlash()
 }
 
-/**
- * Injects a prominent call-to-action button into the popup DOM with retry support.
- * Creates all elements using the popup's own ownerDocument to guarantee event handlers
- * fire correctly even when the popup lives in a different iframe/document context.
- */
-export const injectCompareButtonIntoPopupDOM = (
-  view: any,
-  originDataSource?: DataSource,
-  comparisonOptions?: ComparisonOptions,
-  retryCount: number = 0,
-  selectedFeature?: any
-): void => {
-  const tryInject = () => {
-    try {
-      if (!view?.popup?.visible) return
 
-      const targetDoc = view?.container?.ownerDocument || view?.popup?.container?.ownerDocument || document
-      const popupDom = (view.popup.container as HTMLElement) || (targetDoc.querySelector('.esri-popup') as HTMLElement) || (document.querySelector('.esri-popup') as HTMLElement)
-      if (!popupDom) {
-        if (retryCount < 15) {
-          setTimeout(() => injectCompareButtonIntoPopupDOM(view, originDataSource, comparisonOptions, retryCount + 1, selectedFeature), 150)
-        }
-        return
-      }
-
-      const contentEl = (popupDom.querySelector('.esri-popup__content') as HTMLElement) || (targetDoc.querySelector('.esri-popup__content') as HTMLElement)
-      if (!contentEl) {
-        if (retryCount < 15) {
-          setTimeout(() => injectCompareButtonIntoPopupDOM(view, originDataSource, comparisonOptions, retryCount + 1, selectedFeature), 150)
-        }
-        return
-      }
-
-      // If already in comparison mode or banner already exists, do not duplicate
-      if (contentEl.querySelector('.pyc-incontent-banner') || popupDom.querySelector('.pyc-mount-wrapper')) {
-        return
-      }
-
-      // Ensure click delegation is active
-      setupPopupComparisonHandler(view, originDataSource, comparisonOptions)
-
-      // Attach MutationObserver to contentEl so that if Esri re-renders popup contents,
-      // the compare button is automatically re-injected
-      if (!(contentEl as any)._pycObserver) {
-        try {
-          const obs = new MutationObserver(() => {
-            if (!contentEl.querySelector('.pyc-incontent-banner') && !popupDom.querySelector('.pyc-mount-wrapper')) {
-              injectCompareButtonIntoPopupDOM(view, originDataSource, comparisonOptions, 0, selectedFeature)
-            }
-          })
-          obs.observe(contentEl, { childList: true, subtree: false })
-          ;(contentEl as any)._pycObserver = obs
-        } catch (_) {}
-      }
-
-      // CRITICAL: Use the popup element's own ownerDocument for createElement.
-      const popupOwnerDoc = contentEl.ownerDocument || targetDoc || document
-
-      const banner = popupOwnerDoc.createElement('div')
-      banner.className = 'pyc-incontent-banner'
-      banner.style.cssText = 'margin-top: 14px; padding-top: 10px; border-top: 1px solid rgba(0,0,0,0.1); text-align: center; direction: rtl;'
-
-      const btn = popupOwnerDoc.createElement('button')
-      btn.type = 'button'
-      btn.className = 'pyc-trigger-btn'
-      btn.setAttribute('data-comparison-trigger', 'true')
-      btn.style.cssText = 'width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 14px; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: #ffffff; border: none; border-radius: 8px; font-weight: 700; font-size: 13px; cursor: pointer !important; box-shadow: 0 2px 8px rgba(2, 132, 199, 0.4); transition: all 0.2s; position: relative; z-index: 10; pointer-events: auto !important; user-select: none;'
-      btn.innerHTML = '<span style="font-size: 16px; pointer-events: none;">📈</span><span style="pointer-events: none;">مقارنة أراضي المالك عبر السنوات (سنة الرفع)</span>'
-
-      btn.onmouseenter = () => {
-        btn.style.background = 'linear-gradient(135deg, #0369a1 0%, #075985 100%)'
-        btn.style.transform = 'translateY(-1px)'
-      }
-      btn.onmouseleave = () => {
-        btn.style.background = 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)'
-        btn.style.transform = 'translateY(0)'
-      }
-
-      // Store reference on window so the postMessage fallback can reach it
-      const win = (popupOwnerDoc.defaultView || window) as any
-      win._pycCompareView = view
-      win._pycCompareDS = originDataSource
-      win._pycCompareOpts = comparisonOptions
-      win._pycCompareFeature = selectedFeature
-
-      let lastTrigger = 0
-      const triggerOpen = (e?: Event) => {
-        if (e) {
-          try { e.preventDefault() } catch (_) {}
-          try { e.stopPropagation() } catch (_) {}
-        }
-        const now = Date.now()
-        if (now - lastTrigger < 500) return
-        lastTrigger = now
-        console.log('>>> [AdvancedChart] Compare button clicked directly!', { selectedFeature })
-        const feature = selectedFeature || view?.popup?.selectedFeature || view?.popup?.features?.[0]
-        openComparisonPopup(view, feature, originDataSource, comparisonOptions)
-      }
-
-      // Primary: onclick property (works in same-document context)
-      btn.onclick = triggerOpen
-
-      // Secondary: addEventListener in capture phase
-      btn.addEventListener('click', triggerOpen, true)
-
-      // Tertiary: pointerup as fallback for touch/pen
-      btn.addEventListener('pointerup', (e: PointerEvent) => {
-        if (e.button === 0) triggerOpen(e)
-      }, true)
-
-      // Quaternary: inline onclick attribute — this compiles into the popup's own
-      // document context, bypassing any cross-document event binding issues
-      btn.setAttribute('onclick',
-        "event.preventDefault();event.stopPropagation();" +
-        "var w=this.ownerDocument.defaultView||window;" +
-        "console.log('>>> [AdvancedChart] Compare via inline onclick');" +
-        "if(w._pycTriggerCompare){w._pycTriggerCompare()}" +
-        "else if(w.parent&&w.parent._pycTriggerCompare){w.parent._pycTriggerCompare()}" +
-        "else if(w.top&&w.top._pycTriggerCompare){w.top._pycTriggerCompare()}"
-      )
-
-      // Register the trigger function on ALL reachable windows so inline onclick can find it
-      const triggerFn = () => triggerOpen()
-      ;[window, win].forEach((w: any) => {
-        if (w) {
-          try { w._pycTriggerCompare = triggerFn } catch (_) {}
-        }
-      })
-      try {
-        if ((window as any).parent) (window as any).parent._pycTriggerCompare = triggerFn
-      } catch (_) {}
-      try {
-        if ((window as any).top) (window as any).top._pycTriggerCompare = triggerFn
-      } catch (_) {}
-
-      // Also listen for postMessage as ultimate fallback
-      const messageKey = '_pyc_compare_trigger_' + Date.now()
-      btn.setAttribute('data-pyc-msg-key', messageKey)
-      const msgHandler = (ev: MessageEvent) => {
-        if (ev.data === messageKey) {
-          triggerOpen()
-        }
-      }
-      win.addEventListener('message', msgHandler)
-      window.addEventListener('message', msgHandler)
-
-      banner.appendChild(btn)
-      contentEl.appendChild(banner)
-      console.log('>>> [AdvancedChart] Compare button injected into popup DOM successfully', {
-        popupOwnerDocURL: popupOwnerDoc?.location?.href || '(same)',
-        widgetDocURL: document?.location?.href || '(same)',
-        sameDoc: popupOwnerDoc === document,
-        contentElTag: contentEl.tagName,
-        btnInDOM: contentEl.contains(btn)
-      })
-    } catch (e) {
-      console.error('>>> [AdvancedChart] Error injecting compare button:', e)
-    }
-  }
-
-  setTimeout(tryInject, 100)
-}
 
 /**
  * Sets up action trigger, click delegation, and view watchers on a MapView popup.
@@ -555,15 +394,48 @@ export const injectCompareButtonIntoPopupDOM = (
  * the popup watchers always use current values — not stale closure captures.
  * This ensures the Compare button appears on EVERY popup: chart click, map click, or list selection.
  */
+const COMPARE_ACTION_ID = 'compare-parcels-year-action'
+
+/**
+ * Adds the comparison to the pop-up's own action bar, beside Zoom to and Edit.
+ *
+ * This is the pop-up's public API rather than its private DOM, so the button
+ * looks native, sits where people expect it, and is not at the mercy of how Esri
+ * happens to render pop-up content in a given release. Returns false when the
+ * view exposes no actions collection, in which case the caller falls back to
+ * injecting a banner into the body.
+ */
+export const ensureCompareAction = (view: any): boolean => {
+  const actions = view?.popup?.actions
+  if (!actions || typeof actions.add !== 'function') return false
+
+  try {
+    const has = typeof actions.some === 'function'
+      ? actions.some((a: any) => a?.id === COMPARE_ACTION_ID)
+      : false
+    if (!has) {
+      actions.add({
+        id: COMPARE_ACTION_ID,
+        title: 'مقارنة عبر السنوات',
+        className: 'esri-icon-line-chart'
+      })
+    }
+    return true
+  } catch (e) {
+    return false
+  }
+}
+
 export const setupPopupComparisonHandler = (
   view: any,
   originDataSource?: DataSource,
-  comparisonOptions?: ComparisonOptions
+  comparisonOptions?: ComparisonContext
 ): void => {
   if (!view?.popup) return
 
   // Always update the stored config on the view so watchers use the latest values
   view._pycConfig = { originDataSource, comparisonOptions }
+  view._pycActionOk = ensureCompareAction(view)
 
   // 1. Esri native action listener (always renew handle to ensure latest comparisonOptions)
   if (view.popup._compareActionHandle?.remove) {
@@ -578,7 +450,6 @@ export const setupPopupComparisonHandler = (
         String(event?.action?.id || '').includes('compare') ||
         String(event?.action?.title || '').includes('مقارنة')
       ) {
-        console.log('>>> [AdvancedChart] Trigger action clicked:', event.action)
         const cfg = view._pycConfig || {}
         const feature = view.popup.selectedFeature || view.popup.features?.[0]
         openComparisonPopup(view, feature, cfg.originDataSource, cfg.comparisonOptions)
@@ -658,7 +529,6 @@ export const setupPopupComparisonHandler = (
       const now = Date.now()
       if (now - lastGlobalClickTrigger < 500) return
       lastGlobalClickTrigger = now
-      console.log('>>> [AdvancedChart] Compare button clicked via global delegation!', { target })
       const cfg = view._pycConfig || {}
       const feature = view?.popup?.selectedFeature || view?.popup?.features?.[0]
       openComparisonPopup(view, feature, cfg.originDataSource, cfg.comparisonOptions)
@@ -672,69 +542,6 @@ export const setupPopupComparisonHandler = (
     } catch (e) {}
   })
 
-  // 3. Watchers for visible & selectedFeature to inject button banner into ANY popup
-  // The watchers read from view._pycConfig (set above) instead of closure values,
-  // so even if comparisonOptions or originDataSource change later, the button always
-  // gets the latest config.
-  if (typeof view.popup.watch === 'function' && !view.popup._hasCompareWatchers) {
-    view.popup._hasCompareWatchers = true
-    try {
-      view.popup.watch('visible', (visible: boolean) => {
-        if (visible) {
-          const cfg = view._pycConfig || {}
-          // Inject after a small delay to let popup content render
-          setTimeout(() => {
-            if (view.popup?.visible) {
-              injectCompareButtonIntoPopupDOM(view, cfg.originDataSource, cfg.comparisonOptions, 0, view.popup.selectedFeature)
-            }
-          }, 200)
-        }
-      })
-      view.popup.watch('selectedFeature', (sf: any) => {
-        if (view.popup.visible) {
-          const cfg = view._pycConfig || {}
-          injectCompareButtonIntoPopupDOM(view, cfg.originDataSource, cfg.comparisonOptions, 0, sf)
-        }
-      })
-      // Also watch 'features' array changes (fires when popup.open({features}) is called)
-      view.popup.watch('features', () => {
-        if (view.popup.visible) {
-          const cfg = view._pycConfig || {}
-          const sf = view.popup.selectedFeature || view.popup.features?.[0]
-          setTimeout(() => {
-            if (view.popup?.visible) {
-              injectCompareButtonIntoPopupDOM(view, cfg.originDataSource, cfg.comparisonOptions, 0, sf)
-            }
-          }, 300)
-        }
-      })
-    } catch (e) {}
-  }
-
-  // 4. Periodic check: re-inject button if popup is visible but button is missing
-  // This catches popups opened by direct map clicks where watchers may not fire
-  if (!view.popup._pycIntervalId) {
-    view.popup._pycIntervalId = setInterval(() => {
-      try {
-        if (!view.popup?.visible) return
-        const cfg = view._pycConfig || {}
-        if (!cfg.originDataSource && !cfg.comparisonOptions) return
-
-        const targetDoc = view?.container?.ownerDocument || document
-        const popupDom = (view.popup.container as HTMLElement) || (targetDoc.querySelector('.esri-popup') as HTMLElement)
-        if (!popupDom) return
-
-        const contentEl = popupDom.querySelector('.esri-popup__content') as HTMLElement
-        if (!contentEl) return
-
-        // Only inject if no banner exists yet and not in comparison mode
-        if (!contentEl.querySelector('.pyc-incontent-banner') && !popupDom.querySelector('.pyc-mount-wrapper')) {
-          const sf = view.popup.selectedFeature || view.popup.features?.[0]
-          injectCompareButtonIntoPopupDOM(view, cfg.originDataSource, cfg.comparisonOptions, 0, sf)
-        }
-      } catch (e) {}
-    }, 1500)
-  }
 }
 
 /**
@@ -746,10 +553,8 @@ export const openComparisonPopup = (
   view?: any,
   feature?: any,
   originDataSource?: DataSource,
-  comparisonOptions?: ComparisonOptions
+  comparisonOptions?: ComparisonContext
 ): void => {
-  console.log('>>> [AdvancedChart] openComparisonPopup initiated', { view, feature, comparisonOptions })
-
   // Resolve target map view
   const views = getTargetJimuMapViews()
   const activeView = view || views.find((v: any) => v?.view?.popup?.visible)?.view || views[0]?.view
@@ -762,8 +567,8 @@ export const openComparisonPopup = (
 
   // 1. Resolve Person Name with robust fallbacks
   const attrs = activeFeature?.attributes || (typeof activeFeature?.getData === 'function' ? activeFeature.getData() : {}) || {}
-  const clientField = comparisonOptions?.clientField || 'Client'
-  let personName = attrs[clientField] ?? attrs[clientField.toLowerCase()] ?? attrs[clientField.toUpperCase()]
+  const entityField = comparisonOptions?.entityField || 'Client'
+  let personName = attrs[entityField] ?? attrs[entityField.toLowerCase()] ?? attrs[entityField.toUpperCase()]
 
   if (!personName) {
     const candidateKey = Object.keys(attrs).find(k => /(?:client|person|owner|عميل|مالك|اسم)/i.test(k) && !/(?:id|code|airport|مطار)/i.test(k))
@@ -807,21 +612,19 @@ export const openComparisonPopup = (
   }
 
   // 2. Resolve Airport Name and Raw Value
-  const airportField = comparisonOptions?.airportField || 'AirportName'
+  const categoryField = comparisonOptions?.categoryField || 'AirportName'
   const rawAirportValue =
-    attrs[airportField] ??
-    attrs[airportField.toLowerCase()] ??
+    attrs[categoryField] ??
+    attrs[categoryField.toLowerCase()] ??
     attrs.airportname ??
     attrs.AirportName ??
     attrs.AIRPORTNAME
 
-  const airportName = comparisonOptions?.selectedAirportName ||
+  const airportName = comparisonOptions?.categoryValue ||
     (rawAirportValue != null ? String(rawAirportValue) : '') ||
     attrs.AirportName ||
     attrs.airportname ||
     ''
-
-  console.log('>>> [AdvancedChart] Resolved comparison target:', { personName, airportName, rawAirportValue, clientField, airportField })
 
   // Target DOM container: .esri-popup__main-container (or popupDom)
   const mainContainer = (popupDom?.querySelector('.esri-popup__main-container') as HTMLElement) || popupDom
@@ -833,7 +636,6 @@ export const openComparisonPopup = (
   // If a previous comparison overlay exists, remove it cleanly so it can re-mount freshly
   const existingWrapper = mainContainer.querySelector('.pyc-mount-wrapper') || document.querySelector('.pyc-mount-wrapper')
   if (existingWrapper && existingWrapper.parentNode) {
-    console.log('>>> [AdvancedChart] Removing stale pyc-mount-wrapper before mounting')
     existingWrapper.parentNode.removeChild(existingWrapper)
   }
 
@@ -883,7 +685,6 @@ export const openComparisonPopup = (
   const cleanup = () => {
     if (unmounted) return
     unmounted = true
-    console.log('>>> [AdvancedChart] Cleaning up comparison popup')
 
     if (unmountCallback) {
       try {
@@ -954,7 +755,6 @@ export const openComparisonPopup = (
 
   // 3. Append the overlay container into mainContainer FIRST
   mainContainer.appendChild(mountContainer)
-  console.log('>>> [AdvancedChart] Appended mountContainer to mainContainer successfully')
 
   // 4. Mount the React Comparison Component into mountContainer
   unmountCallback = mountPersonYearComparison(mountContainer, {
@@ -964,15 +764,14 @@ export const openComparisonPopup = (
     dataSource: originDataSource,
     layer: targetLayer,
     serviceUrl,
-    clientField,
-    airportField,
+    entityField,
+    categoryField,
     yearField: comparisonOptions?.yearField || 'Year',
-    areaField: comparisonOptions?.areaField || 'إجمالي المساحة بالفدان',
+    valueField: comparisonOptions?.valueField || 'إجمالي المساحة بالفدان',
     sampleAttributes: attrs,
     onBack: handleBack,
     onClose: handleClose
   })
-  console.log('>>> [AdvancedChart] mountPersonYearComparison invoked successfully')
 }
 
 /**
@@ -980,11 +779,39 @@ export const openComparisonPopup = (
  * Uses a polling interval so that map views appearing after initial render
  * are discovered and configured with the latest config.
  */
+/**
+ * Stops offering the comparison: halts the poller, drops the shared config and
+ * removes any button already injected into an open pop-up.
+ */
+export const unregisterGlobalPopupComparisonHandler = (): void => {
+  const win = window as any
+  if (win._pycRegisterIntervalId) {
+    clearInterval(win._pycRegisterIntervalId)
+    win._pycRegisterIntervalId = undefined
+  }
+  win._pycGlobalConfig = undefined
+  try {
+    const docs = [document, win.top?.document, win.parent?.document].filter(Boolean)
+    for (const d of docs) {
+      d.querySelectorAll('.pyc-incontent-banner').forEach((el: Element) => { el.remove() })
+    }
+  } catch (e) {}
+}
+
 export const registerGlobalPopupComparisonHandler = (
   originDataSource?: DataSource,
-  comparisonOptions?: ComparisonOptions
+  comparisonOptions?: ComparisonContext
 ): void => {
   const win = window as any
+
+  // Turning the feature off has to actually tear down. Writing an empty config
+  // and leaving the poller running used to leave a button behind in any open
+  // pop-up, wired to a config that no longer existed, so clicking it did nothing.
+  if (!originDataSource && !comparisonOptions) {
+    unregisterGlobalPopupComparisonHandler()
+    return
+  }
+
   // Always update global config so interval uses the latest
   win._pycGlobalConfig = { originDataSource, comparisonOptions }
 
@@ -1020,7 +847,6 @@ export const zoomMapToRecords = async (
   categoryField?: string,
   originDataSource?: DataSource,
   openPopup: boolean = true,
-  comparisonOptions?: ComparisonOptions,
   autoZoomToParcel: boolean = true
 ): Promise<void> => {
   try {
@@ -1113,20 +939,9 @@ export const zoomMapToRecords = async (
           }
         }
 
-        // Attach comparison action to popupTemplate
-        try {
-          const tpl = graphic.popupTemplate?.clone ? graphic.popupTemplate.clone() : { ...(graphic.popupTemplate || {}) }
-          const actions = Array.isArray(tpl.actions) ? [...tpl.actions] : []
-          if (!actions.some((a: any) => a?.id === 'compare-parcels-year-action')) {
-            actions.push({
-              id: 'compare-parcels-year-action',
-              title: '📈 مقارنة أراضي المالك عبر السنوات (سنة الرفع)',
-              className: 'esri-icon-line-chart'
-            })
-          }
-          tpl.actions = actions
-          graphic.popupTemplate = tpl
-        } catch (e) {}
+        // The comparison lives on the view's own action bar, added once per view by
+        // ensureCompareAction. Adding it to each graphic's template as well produced
+        // a second, differently worded entry for the same thing.
 
         return graphic
       })
@@ -1171,12 +986,14 @@ export const zoomMapToRecords = async (
 
       // 3. Flash the new parcel on the map
       try {
-        flashGraphicsOnView(view, popupGraphics, GraphicClass)
+        if (autoZoomToParcel) {
+          flashGraphicsOnView(view, popupGraphics, GraphicClass)
+        }
       } catch (flashErr) {}
 
       // 4. Highlight the new parcel (sole selection) on the layerView
       try {
-        if (matchingLayer && typeof view.whenLayerView === 'function') {
+        if (autoZoomToParcel && matchingLayer && typeof view.whenLayerView === 'function') {
           view.whenLayerView(matchingLayer).then((layerView: any) => {
             if (layerView && typeof layerView.highlight === 'function') {
               const handle = layerView.highlight(popupGraphics)
@@ -1204,9 +1021,6 @@ export const zoomMapToRecords = async (
               location: popupLocation
             })
           }
-
-          setupPopupComparisonHandler(view, originDataSource, comparisonOptions)
-          injectCompareButtonIntoPopupDOM(view, originDataSource, comparisonOptions, 0, popupGraphics[0])
         }
       } catch (popupErr) {
         console.warn('Failed to open popup for parcel:', popupErr)
@@ -1227,7 +1041,7 @@ export const selectAndZoomToPerson = async (
   originDataSource?: DataSource,
   autoZoomToParcel: boolean = true,
   openSelectionPopup: boolean = true,
-  comparisonOptions?: ComparisonOptions
+  internalSelectionGuard?: { current: boolean }
 ): Promise<void> => {
   if (!originDataSource || personName == null || personName === '') return
 
@@ -1239,9 +1053,6 @@ export const selectAndZoomToPerson = async (
     const match = fieldNames.find(f => f.toLowerCase() === actualField.toLowerCase())
     if (match) {
       actualField = match
-    } else if (comparisonOptions?.clientField) {
-      const matchClient = fieldNames.find(f => f.toLowerCase() === comparisonOptions.clientField!.toLowerCase())
-      if (matchClient) actualField = matchClient
     } else {
       const candidateKey = fieldNames.find(f =>
         /(?:client|person|owner|عميل|مالك|اسم)/i.test(f) &&
@@ -1283,14 +1094,21 @@ export const selectAndZoomToPerson = async (
       // Synchronize selection on originDataSource
       try {
         const ids = parcelRecords.map((r: any) => r.getId?.() || r.id).filter(Boolean)
-        if (ids.length && typeof originDataSource.selectRecordsByIds === 'function') {
-          isInternalSelectionRef.current = true
+        if (autoZoomToParcel && ids.length && typeof originDataSource.selectRecordsByIds === 'function') {
+          if (internalSelectionGuard) internalSelectionGuard.current = true
           originDataSource.selectRecordsByIds(ids)
-          setTimeout(() => { isInternalSelectionRef.current = false }, 1000)
+          setTimeout(() => { if (internalSelectionGuard) internalSelectionGuard.current = false }, 1000)
         }
       } catch (e) {}
 
-      await zoomMapToRecords(parcelRecords, actualField, originDataSource, openSelectionPopup, comparisonOptions, autoZoomToParcel)
+      // With the map response switched off, the map is left exactly as the user
+      // left it. Opening a pop-up here would gather every parcel belonging to the
+      // person and show them as "1 of N", which reveals the other parcels the user
+      // did not pick. The figures are still computed on demand from the compare
+      // button in whichever pop-up the user opened themselves.
+      if (autoZoomToParcel) {
+        await zoomMapToRecords(parcelRecords, actualField, originDataSource, openSelectionPopup, autoZoomToParcel)
+      }
     }
   } catch (err) {
     console.error('Failed to query parcel records for person:', err)
@@ -1310,8 +1128,7 @@ const useSelection = (
   originDataSource?: DataSource,
   categoryField?: string,
   autoZoomToParcel: boolean = true,
-  openSelectionPopup: boolean = true,
-  comparisonOptions?: ComparisonOptions
+  openSelectionPopup: boolean = true
 ): [SelectionData, (...args: any[]) => any] => {
   const numberFieldsRef = hooks.useLatest(numberFields)
   const preSelectedIdsRef = React.useRef<string[]>()
@@ -1389,7 +1206,7 @@ const useSelection = (
           originDataSource,
           autoZoomToParcel,
           openSelectionPopup,
-          comparisonOptions
+          isInternalSelectionRef
         )
       }
     }
@@ -1454,7 +1271,7 @@ const useSelection = (
     if (isInternalSelectionRef.current) return
 
     try {
-      const clientField = comparisonOptions?.clientField || 'Client'
+      const entityField = categoryField || 'Client'
 
       // 1. Get the selected record from memory or fetch from data source
       let rec: any = null
@@ -1486,9 +1303,9 @@ const useSelection = (
       // 2. Extract person name from record attributes
       let personName =
         data[activeCategoryField] ??
-        data[clientField] ??
+        data[entityField] ??
         data[activeCategoryField?.toLowerCase()] ??
-        data[clientField?.toLowerCase()] ??
+        data[entityField?.toLowerCase()] ??
         data.Client ??
         data.client ??
         data.CLIENT ??
@@ -1523,15 +1340,12 @@ const useSelection = (
       isInternalSelectionRef.current = true
       setTimeout(() => { isInternalSelectionRef.current = false }, 1000)
 
-      // 3. Zoom map to all parcels for this person and open popup with Compare button
-      await selectAndZoomToPerson(
-        personName,
-        activeCategoryField,
-        originDataSource,
-        autoZoomToParcel,
-        openSelectionPopup,
-        comparisonOptions
-      )
+      // 3. The selection the user made is left exactly as it is. Widening it to
+      // every parcel owned by the same person turned a deliberate pick of one
+      // parcel into a "1 of 5" pop-up, so it was no longer clear which parcel was
+      // being looked at. The person is still resolved here, which is all the
+      // comparison needs: it groups by owner across years on demand, from the
+      // pop-up of whichever single parcel the user actually chose.
 
       // 4. Synchronize chart selection so the corresponding bar is highlighted
       if (outputDataSource) {
@@ -1564,10 +1378,6 @@ const useSelection = (
 
     handleExternalOriginSelection(mutableOriginIds)
   }, [originSelectedIds, originDataSource, handleExternalOriginSelection])
-
-  React.useEffect(() => {
-    registerGlobalPopupComparisonHandler(originDataSource, comparisonOptions)
-  }, [originDataSource, comparisonOptions])
 
   const selectionData = React.useMemo(() => ({ selectionItems }), [selectionItems])
   return [selectionData, handleSelectionChange]

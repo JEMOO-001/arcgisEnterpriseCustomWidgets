@@ -1,5 +1,5 @@
-import { React, ReactRedux, DataSourceManager, Immutable, type ImmutableObject, type UseDataSource, type WidgetInitDragCallback, type QueriableDataSource, type IMState, type DataSource, dataSourceUtils } from 'jimu-core'
-import { type ChartComponentProps, type ChartTools, type IWebChart, type TemplateType, type RechartConfig, type ComparisonOptions } from '../../config'
+import { React, ReactRedux, DataSourceManager, Immutable, type ImmutableObject, type UseDataSource, type WidgetInitDragCallback, type QueriableDataSource, type IMState, type FeatureLayerQueryParams, dataSourceUtils } from 'jimu-core'
+import { type ChartComponentProps, type ChartTools, type IWebChart, type TemplateType, type RechartConfig, type FeaturesConfig, type ComparisonContext } from '../../config'
 import { getChartText, DefaultTitleSize, DefaultTitleColor } from '../../utils/default'
 import { ChartRuntimeStateProvider } from '../state'
 import Chart from './index'
@@ -371,6 +371,80 @@ export const extractSingleFilterValue = (where?: string, targetField?: string): 
   return undefined
 }
 
+/** Enough grouped rows to tell "exactly one" from "more than one", and no more. */
+const CATEGORY_SCOPE_PAGE_SIZE = 5
+
+/** Filters and map extents can change in bursts, so let them settle before querying. */
+const CATEGORY_SCOPE_DEBOUNCE_MS = 250
+
+const readField = (record: any, field: string): any => {
+  const data = record?.getData?.() || {}
+  const key = Object.keys(data).find(k => k.toLowerCase() === field.toLowerCase())
+  return key ? data[key] : undefined
+}
+
+const distinctOf = (values: any[]): { count: number, value?: string } => {
+  const set = new Set<string>()
+  for (const v of values) {
+    if (v == null) continue
+    const s = String(v).trim()
+    if (s) set.add(s)
+  }
+  const arr = Array.from(set)
+  return { count: arr.length, value: arr.length === 1 ? arr[0] : undefined }
+}
+
+/**
+ * How many distinct values of `field` the data source currently has in scope, and,
+ * when there is exactly one, which value that is.
+ *
+ * "In scope" means whatever the data source is showing right now: an explicit
+ * selection when one exists, otherwise its current query, which already carries any
+ * where clause, geometry or time filter that other widgets have applied to it.
+ *
+ * Reading the data this way keeps the inner chart independent of how a particular
+ * experience was wired. A filter action, a select action, a list widget, a map
+ * extent or a plain feature click all narrow the data source, and all of them are
+ * visible here without parsing SQL or guessing at data source names.
+ */
+export async function getCategoryScope (
+  ds: QueriableDataSource,
+  field: string
+): Promise<{ count: number, value?: string } | undefined> {
+  if (!ds || !field) return undefined
+
+  const selected = ds.getSelectedRecords?.() ?? []
+  if (selected.length) {
+    const scope = distinctOf(selected.map(r => readField(r, field)))
+    if (scope.count) return scope
+  }
+
+  if (typeof ds.query !== 'function') return undefined
+
+  const current: any = ds.getCurrentQueryParams?.() || {}
+  const params = {
+    where: current.where || '1=1',
+    geometry: current.geometry,
+    geometryType: current.geometryType,
+    spatialRel: current.spatialRel,
+    distance: current.distance,
+    units: current.units,
+    time: current.time,
+    gdbVersion: current.gdbVersion,
+    groupByFieldsForStatistics: [field],
+    outStatistics: [{
+      statisticType: 'count',
+      onStatisticField: field,
+      outStatisticFieldName: 'exbCategoryCount'
+    }],
+    returnGeometry: false,
+    pageSize: CATEGORY_SCOPE_PAGE_SIZE
+  } as unknown as FeatureLayerQueryParams
+
+  const result = await ds.query(params)
+  return distinctOf((result?.records ?? []).map(r => readField(r, field)))
+}
+
 export const isFieldFilteredToSingleValue = (where?: string, targetField?: string): boolean => {
   if (targetField) {
     return extractSingleFilterValue(where, targetField) !== undefined
@@ -613,6 +687,7 @@ interface RechartContainerProps {
   defaultTemplateType: TemplateType
   outputDataSourceId: string
   rechartConfig?: ImmutableObject<RechartConfig>
+  featuresConfig?: ImmutableObject<FeaturesConfig>
 }
 
 export const RechartContainer = (props: RechartContainerProps): React.ReactElement => {
@@ -626,7 +701,8 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
     onInitDragHandler,
     defaultTemplateType,
     outputDataSourceId,
-    rechartConfig
+    rechartConfig,
+    featuresConfig
   } = props
 
   const rechartEnabled = !!rechartConfig?.enabled && !!rechartConfig?.webChart
@@ -654,7 +730,46 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
 
   const dsInfo = ReactRedux.useSelector((state: IMState) => state.dataSourcesInfo?.[dataSourceId])
   const mainDsInfo = ReactRedux.useSelector((state: IMState) => state.dataSourcesInfo?.[mainDataSourceId])
-  const allDataSourcesInfo = ReactRedux.useSelector((state: IMState) => state.dataSourcesInfo)
+
+  // What the data source actually holds right now, re-read whenever anything that
+  // narrows it changes. This is the signal the inner chart switches on, so the
+  // behaviour no longer depends on how a given experience wires its filtering.
+  const [categoryScope, setCategoryScope] = React.useState<{ count: number, value?: string } | null>(null)
+
+  React.useEffect(() => {
+    if (!rechartEnabled || !dataSourceId || !triggerField) {
+      setCategoryScope(null)
+      return
+    }
+
+    let active = true
+    const timer = setTimeout(() => {
+      const ds = DataSourceManager.getInstance().getDataSource(dataSourceId) as QueriableDataSource
+      if (!ds) return
+      getCategoryScope(ds, triggerField)
+        .then(scope => { if (active) setCategoryScope(scope ?? null) })
+        .catch(() => { if (active) setCategoryScope(null) })
+    }, CATEGORY_SCOPE_DEBOUNCE_MS)
+
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
+  }, [
+    rechartEnabled,
+    dataSourceId,
+    triggerField,
+    dsInfo?.filterVersion,
+    dsInfo?.sourceVersion,
+    dsInfo?.gdbVersion,
+    dsInfo?.selectedIds,
+    dsInfo?.widgetQueries,
+    mainDsInfo?.filterVersion,
+    mainDsInfo?.sourceVersion,
+    mainDsInfo?.gdbVersion,
+    mainDsInfo?.selectedIds,
+    mainDsInfo?.widgetQueries
+  ])
 
   const isSingleValue = React.useMemo(() => {
     if (!rechartEnabled || !dataSourceId) return false
@@ -692,29 +807,16 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
       return true
     }
 
-    // 4. Check if any airport-related data source in the app has a single value filter or single selected record
-    if (allDataSourcesInfo) {
-      for (const otherId of Object.keys(allDataSourcesInfo)) {
-        if (otherId === dataSourceId || otherId === mainDataSourceId) continue
-        const otherInfo = allDataSourcesInfo[otherId]
-        if (!otherInfo) continue
-        const otherDs = DataSourceManager.getInstance().getDataSource(otherId)
-        if (isAirportDataSource(otherDs, otherId)) {
-          if (otherInfo.selectedIds?.length === 1) return true
-          if (checkInfoQueries(otherInfo)) return true
-          const otherWhere = (otherDs as QueriableDataSource)?.getCurrentQueryParams?.()?.where
-          if (isFieldFilteredToSingleValue(otherWhere, triggerField)) return true
-        }
-      }
-    }
-
-    // 5. Cross-data source selected records fallback
-    const crossAirport = findAirportNameFromAllDataSources()
-    if (crossAirport) {
+    // 4. The data source itself has narrowed to a single category value.
+    // This is the general case and covers every route to it: a filter action, a
+    // select action, a list widget, a map extent or a plain feature click. The
+    // checks above are kept only because they answer synchronously, which avoids
+    // showing the outer chart for a moment while this query runs.
+    if (categoryScope?.count === 1) {
       return true
     }
 
-    // 6. Parcel feature selection fallback (for backward compatibility if someone clicks a parcel or chart bar)
+    // 5. Parcel feature selection fallback (for backward compatibility if someone clicks a parcel or chart bar)
     const selectedRecordIds = (ds as QueriableDataSource)?.getSelectedRecordIds?.() || dsInfo?.selectedIds || mainDsInfo?.selectedIds || []
     if (selectedRecordIds.length === 1) {
       return true
@@ -731,17 +833,9 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
     dataSourceId,
     mainDataSourceId,
     triggerField,
-    dsInfo?.widgetQueries,
-    dsInfo?.filterVersion,
-    dsInfo?.sourceVersion,
-    dsInfo?.gdbVersion,
-    dsInfo?.selectedIds,
-    mainDsInfo?.widgetQueries,
-    mainDsInfo?.filterVersion,
-    mainDsInfo?.sourceVersion,
-    mainDsInfo?.gdbVersion,
-    mainDsInfo?.selectedIds,
-    allDataSourcesInfo
+    dsInfo,
+    mainDsInfo,
+    categoryScope
   ])
 
   const [dbAirportName, setDbAirportName] = React.useState<string>('')
@@ -1113,8 +1207,22 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
   const selectedAirportName = React.useMemo(() => {
     if (!isSingleValue) return ''
 
+    // The scope query already grouped by this very field, so the single value it
+    // returned is the category in view. Trust it ahead of the attribute heuristics.
+    const scoped = categoryScope?.count === 1 ? categoryScope.value?.trim() : undefined
+    if (scoped && !/^\d+$/.test(scoped)) {
+      return scoped
+    }
+
     if (dbAirportName && !/^\d+$/.test(dbAirportName.trim())) {
       return dbAirportName.trim()
+    }
+
+    if (scoped && dataSourceId) {
+      // A coded value: resolve it to its label.
+      const ds = DataSourceManager.getInstance().getDataSource(dataSourceId)
+      const domainName = lookupDomainName(triggerField, scoped, ds)
+      if (domainName) return domainName
     }
 
     if (dataSourceId) {
@@ -1166,7 +1274,7 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
     }
 
     return ''
-  }, [isSingleValue, dbAirportName, dataSourceId, triggerField, dsInfo?.widgetQueries, mainDsInfo?.widgetQueries])
+  }, [isSingleValue, dbAirportName, categoryScope, dataSourceId, triggerField, dsInfo?.widgetQueries, mainDsInfo?.widgetQueries])
 
   const configuredCount = React.useMemo(() => {
     const rechartCount = getConfiguredPeopleCount(rechartWebChart, rechartOptions, 0)
@@ -1244,20 +1352,44 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
     )?.onStatisticField) || 'AreaF'
   }, [rechartWebChart])
 
-  const comparisonOptions: ComparisonOptions = React.useMemo(() => {
-    return {
-      selectedAirportName,
-      airportField: triggerField || 'AirportName',
-      clientField: resolvedClientField,
-      yearField: 'Year',
-      areaField: resolvedAreaField
-    }
-  }, [selectedAirportName, triggerField, resolvedClientField, resolvedAreaField])
+  // The comparison feature is configured on its own. Anything it does not specify
+  // falls back to what the charts already know, so it keeps working on an experience
+  // that was set up before the feature had settings of its own.
+  const comparisonConfig = featuresConfig?.comparison
+  // An experience saved before this feature had settings of its own carries no
+  // config at all. Treat that as on, so upgrading does not silently remove it;
+  // switching it off is then an explicit choice.
+  const comparisonEnabled = comparisonConfig?.enabled ?? true
 
+  const comparisonContext: ComparisonContext = React.useMemo(() => ({
+    categoryValue: selectedAirportName,
+    categoryField: comparisonConfig?.categoryField || triggerField,
+    entityField: comparisonConfig?.entityField || resolvedClientField,
+    yearField: comparisonConfig?.yearField || 'Year',
+    valueField: comparisonConfig?.valueField || resolvedAreaField
+  }), [
+    selectedAirportName,
+    triggerField,
+    resolvedClientField,
+    resolvedAreaField,
+    comparisonConfig?.categoryField,
+    comparisonConfig?.entityField,
+    comparisonConfig?.yearField,
+    comparisonConfig?.valueField
+  ])
+
+  // Watches the map for any pop-up and offers the comparison from it, whatever
+  // opened it: a chart selection, a single feature clicked on the map, or a list.
+  // The inner chart only ever shows the top few entities, so tying the feature to
+  // it would put everyone outside that top list out of reach.
   React.useEffect(() => {
+    if (!comparisonEnabled) {
+      registerGlobalPopupComparisonHandler(undefined, undefined)
+      return
+    }
     const ds = dataSourceId ? DataSourceManager.getInstance().getDataSource(dataSourceId) : undefined
-    registerGlobalPopupComparisonHandler(ds, comparisonOptions)
-  }, [dataSourceId, comparisonOptions])
+    registerGlobalPopupComparisonHandler(ds, comparisonContext)
+  }, [comparisonEnabled, dataSourceId, comparisonContext])
 
   const activeTools = isSingleValue ? rechartTools : tools
   const activeOptions = React.useMemo(() => {
@@ -1269,15 +1401,13 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
       return (baseOptions as any)
         .set('tooltipFormatter', handleTooltipFormat)
         .set('openSelectionPopup', openSelectionPopup)
-        .set('comparisonOptions', comparisonOptions)
     }
     return {
       ...(baseOptions || {}),
       tooltipFormatter: handleTooltipFormat,
-      openSelectionPopup,
-      comparisonOptions
+      openSelectionPopup
     }
-  }, [isSingleValue, rechartOptions, options, handleTooltipFormat, comparisonOptions])
+  }, [isSingleValue, rechartOptions, options, handleTooltipFormat])
   const activeTemplateType = isSingleValue ? rechartTemplateType : defaultTemplateType
 
   return (

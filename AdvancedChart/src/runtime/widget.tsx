@@ -12,6 +12,7 @@ const Widget = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const options = config?.options ?? DefaultChartComponentProps
   const defaultTemplateType = config?._templateType
   const rechartConfig = config?.rechart
+  const featuresConfig = config?.features
 
   return (
     <div className='jimu-widget widget-chart'>
@@ -26,6 +27,7 @@ const Widget = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         defaultTemplateType={defaultTemplateType}
         outputDataSourceId={outputDataSources?.[0]}
         rechartConfig={rechartConfig}
+        featuresConfig={featuresConfig}
       />
     </div>
   )

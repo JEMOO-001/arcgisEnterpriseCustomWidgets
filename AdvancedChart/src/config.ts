@@ -70,17 +70,44 @@ export interface ChartComponentProps {
 
   /** Custom tooltip formatter passed to chart components */
   tooltipFormatter?: (params: any) => string
-
-  /** Options for year-over-year parcel comparison in popup */
-  comparisonOptions?: ComparisonOptions
 }
 
-export interface ComparisonOptions {
-  selectedAirportName?: string
-  airportField?: string
-  clientField?: string
+/**
+ * Optional features that sit alongside the charts. Each one owns its settings and
+ * its own trigger, so a feature can be added or turned off without touching the
+ * charts or the other features. New features get their own key here.
+ */
+export interface FeaturesConfig {
+  comparison?: ComparisonFeatureConfig
+}
+
+/**
+ * Year-over-year comparison, offered from the map pop-up of a single record.
+ *
+ * Field names are deliberately generic so the feature is not tied to one dataset:
+ * it compares a `valueField` total per `yearField`, for one `entityField` value,
+ * optionally narrowed to the `categoryField` value currently in view.
+ */
+export interface ComparisonFeatureConfig {
+  /** Absent means on, so existing experiences keep the feature. @default true */
+  enabled?: boolean
+  /** The grouping the chart is drilled into, e.g. the airport. Narrows the comparison. */
+  categoryField?: string
+  /** The subject being compared, e.g. the person who owns the parcels. */
+  entityField?: string
+  /** The field holding the year. */
   yearField?: string
-  areaField?: string
+  /** The numeric field totalled per year, e.g. the area. */
+  valueField?: string
+}
+
+/**
+ * What the comparison feature is handed at runtime: its own settings, plus the
+ * live category value in view. The value is state, so it is passed alongside the
+ * config rather than stored in it.
+ */
+export interface ComparisonContext extends ComparisonFeatureConfig {
+  categoryValue?: string
 }
 
 export interface DrilldownOptions {
@@ -145,6 +172,8 @@ export interface Config {
   tools?: ChartTools
   options?: ChartComponentProps
   rechart?: RechartConfig
+  /** Optional features, each configured independently of the charts. */
+  features?: FeaturesConfig
 }
 
 export type IMConfig = ImmutableObject<Config>

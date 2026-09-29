@@ -29,6 +29,9 @@ const DefaultOptions = Immutable(DefaultChartComponentProps)
 
 type SettingProps = AllWidgetSettingProps<IMConfig>
 
+/** One tab per configurable part: the chart, the inside chart, and each feature. */
+type SettingTab = 'primary' | 'rechart' | 'comparison'
+
 const Setting = (props: SettingProps): React.ReactElement => {
   const {
     id,
@@ -41,7 +44,7 @@ const Setting = (props: SettingProps): React.ReactElement => {
 
   const translate = hooks.useTranslation(defaultMessages, jimuiMessages, jimucoreMessages)
 
-  const [activeTab, setActiveTab] = React.useState<'primary' | 'rechart'>('primary')
+  const [activeTab, setActiveTab] = React.useState<SettingTab>('primary')
   const [rechartSidePopperOpen, setRechartSidePopperOpen] = React.useState(false)
   const rechartBtnRef = React.useRef<HTMLButtonElement>(null)
 
@@ -71,6 +74,27 @@ const Setting = (props: SettingProps): React.ReactElement => {
     const field = fields?.[0] ?? ''
     const config = propConfig.setIn(['rechart', 'filterField'], field)
     onSettingChange({ id, config })
+  }
+
+  // Feature: year-over-year comparison. Configured on its own so it stays usable
+  // whether or not the inside chart is enabled.
+  const comparisonConfig = propConfig?.features?.comparison
+  const comparisonEnabled = comparisonConfig?.enabled ?? true
+  const asFieldList = (field?: string) => field ? Immutable([field]) : Immutable([])
+
+  const updateComparison = (patch: { [key: string]: any }) => {
+    const current = comparisonConfig ? comparisonConfig.asMutable({ deep: true }) : {}
+    const features = propConfig?.features ? propConfig.features.asMutable({ deep: true }) : {}
+    const config = propConfig.set('features', Immutable({ ...features, comparison: { ...current, ...patch } }))
+    onSettingChange({ id, config })
+  }
+
+  const handleComparisonToggle = (evt: React.ChangeEvent<HTMLInputElement>) => {
+    updateComparison({ enabled: evt.target.checked })
+  }
+
+  const handleComparisonField = (key: string) => (fields: string[]) => {
+    updateComparison({ [key]: fields?.[0] ?? '' })
   }
 
   const handleUseDataSourceChange = (useDataSources: UseDataSource[]): void => {
@@ -249,10 +273,11 @@ const Setting = (props: SettingProps): React.ReactElement => {
               type='pills'
               fill
               value={activeTab}
-              onChange={(tabId: string) => { setActiveTab(tabId as 'primary' | 'rechart') }}
+              onChange={(tabId: string) => { setActiveTab(tabId as SettingTab) }}
             >
               <Tab id='primary' title={translate('_widgetLabel')} />
               <Tab id='rechart' title={rechartEnabled ? translate('rechartInside') : translate('rechart')} />
+              <Tab id='comparison' title={translate('comparison')} />
             </Tabs>
           </div>
         )}
@@ -377,6 +402,63 @@ const Setting = (props: SettingProps): React.ReactElement => {
               />
             )}
           </>
+        )}
+
+        {activeTab === 'comparison' && (
+          <SettingSection title={translate('comparison')} className='border-top pt-3 mt-3'>
+            <SettingRow label={translate('enableComparison')} flow='no-wrap'>
+              <Switch
+                checked={comparisonEnabled}
+                onChange={handleComparisonToggle}
+              />
+            </SettingRow>
+            <div className='w-100 text-secondary mt-2' style={{ fontSize: '12px' }}>
+              {translate('comparisonTip')}
+            </div>
+            {comparisonEnabled && (
+              <>
+                <SettingRow label={translate('comparisonEntityField')} flow='wrap' className='mt-2'>
+                  <FieldSelector
+                    type='category'
+                    useDataSources={propUseDataSources}
+                    fields={asFieldList(comparisonConfig?.entityField)}
+                    isMultiple={false}
+                    onChange={handleComparisonField('entityField')}
+                  />
+                </SettingRow>
+                <SettingRow label={translate('comparisonYearField')} flow='wrap' className='mt-2'>
+                  <FieldSelector
+                    type='category'
+                    useDataSources={propUseDataSources}
+                    fields={asFieldList(comparisonConfig?.yearField)}
+                    isMultiple={false}
+                    onChange={handleComparisonField('yearField')}
+                  />
+                </SettingRow>
+                <SettingRow label={translate('comparisonValueField')} flow='wrap' className='mt-2'>
+                  <FieldSelector
+                    type='numeric'
+                    useDataSources={propUseDataSources}
+                    fields={asFieldList(comparisonConfig?.valueField)}
+                    isMultiple={false}
+                    onChange={handleComparisonField('valueField')}
+                  />
+                </SettingRow>
+                <SettingRow label={translate('comparisonCategoryField')} flow='wrap' className='mt-2'>
+                  <div className='w-100 text-secondary mb-1' style={{ fontSize: '12px' }}>
+                    {translate('comparisonCategoryFieldTip')}
+                  </div>
+                  <FieldSelector
+                    type='category'
+                    useDataSources={propUseDataSources}
+                    fields={asFieldList(comparisonConfig?.categoryField)}
+                    isMultiple={false}
+                    onChange={handleComparisonField('categoryField')}
+                  />
+                </SettingRow>
+              </>
+            )}
+          </SettingSection>
         )}
 
         <SidePopper

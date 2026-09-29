@@ -34,10 +34,10 @@ export interface PersonYearComparisonProps {
   dataSource?: DataSource
   layer?: any
   serviceUrl?: string
-  clientField?: string
-  airportField?: string
+  entityField?: string
+  categoryField?: string
   yearField?: string
-  areaField?: string
+  valueField?: string
   sampleAttributes?: Record<string, any>
   onBack?: () => void
   onClose?: () => void
@@ -89,10 +89,10 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
     dataSource,
     layer,
     serviceUrl,
-    clientField = 'Client',
-    airportField = 'AirportName',
+    entityField = 'Client',
+    categoryField = 'AirportName',
     yearField = 'Year',
-    areaField = 'إجمالي المساحة بالفدان',
+    valueField = 'إجمالي المساحة بالفدان',
     sampleAttributes,
     onBack,
     onClose
@@ -149,10 +149,10 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
       return fallback
     }
 
-    const actualClientField = findField([clientField, 'client', 'Client'], /^(?:client|person|owner|عميل|مالك|اسم_المالك|اسم)$/i, 'client')
-    const actualAirportField = findField([airportField, 'airportname', 'AirportName'], /^(?:airportname|airport_name|airport|اسم_المطار|مطار)$/i, 'airportname')
+    const actualClientField = findField([entityField, 'client', 'Client'], /^(?:client|person|owner|عميل|مالك|اسم_المالك|اسم)$/i, 'client')
+    const actualAirportField = findField([categoryField, 'airportname', 'AirportName'], /^(?:airportname|airport_name|airport|اسم_المطار|مطار)$/i, 'airportname')
     const actualYearField = findField([yearField, 'year', 'Year'], /^(?:year|year_|survey.*year|upload.*year|سنة_الرفع|سنة.*رفع|سنة)$/i, 'year')
-    const actualAreaField = findField([areaField, 'total_area', 'Total_Area', 'areaf', 'AreaF', 'إجمالي المساحة بالفدان'], /^(?:total_area|areaf|area_f|area|مساحة.*فدان|المساحة|مساحة)$/i, 'total_area')
+    const actualAreaField = findField([valueField, 'total_area', 'Total_Area', 'areaf', 'AreaF', 'إجمالي المساحة بالفدان'], /^(?:total_area|areaf|area_f|area|مساحة.*فدان|المساحة|مساحة)$/i, 'total_area')
 
     console.log('>>> [PersonYearComparison] Resolved fields:', {
       actualClientField,
@@ -565,10 +565,10 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
     personName,
     airportName,
     rawAirportValue,
-    clientField,
-    airportField,
+    entityField,
+    categoryField,
     yearField,
-    areaField,
+    valueField,
     sampleAttributes
   ])
 

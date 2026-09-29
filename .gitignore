@@ -1,0 +1,43 @@
+# This repository root is also the root of an ArcGIS Experience Builder Developer
+# Edition install, so the working directory holds far more than the widget source.
+# DEV tracks the widget source under AdvancedChart/ and nothing else.
+
+# Experience Builder product files. Esri-licensed, and far too large to version.
+/client/
+/server/
+/3rd-party-license.txt
+/readme.txt
+/version.json
+
+# Built widget bundles. Deployed from the main branch, not developed here.
+/exp_widgets/
+
+# Nested git worktrees left behind by editor tooling
+.kilo/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist/
+dist-ssr
+*.local
+build/
+.env
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

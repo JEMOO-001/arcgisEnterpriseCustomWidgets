@@ -91,8 +91,7 @@ function WithInlineDataChart (
     dataSource,
     categoryField,
     options?.autoZoomToParcel ?? true,
-    options?.openSelectionPopup ?? true,
-    options?.comparisonOptions
+    options?.openSelectionPopup ?? true
   )
 
   const chartWillRender: PreRenderCallback = React.useCallback(async (props) => {
