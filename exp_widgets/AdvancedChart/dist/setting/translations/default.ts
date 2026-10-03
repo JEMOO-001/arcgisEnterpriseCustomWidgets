@@ -141,6 +141,14 @@ export default {
   rechartConfigTitle: 'Rechart (Inside Chart) Configuration',
   triggerField: 'Trigger field',
   triggerFieldTip: 'Select the field that triggers the inside chart when filtered to 1 value (defaults to primary chart category field).',
-  zoomToParcel: 'Zoom to parcel on click',
+  comparison: 'Year-to-year comparison',
+  enableComparison: 'Enable year-to-year comparison',
+  comparisonTip: 'Adds a compare button to the map pop-up of a single record, so any record can be compared across years, whichever way it was selected.',
+  comparisonEntityField: 'Compare by',
+  comparisonYearField: 'Year field',
+  comparisonValueField: 'Value field',
+  comparisonCategoryField: 'Limit to category field',
+  comparisonCategoryFieldTip: 'Optional. Restricts the comparison to the category currently in view, such as the selected airport.',
+  zoomToParcel: 'Respond on the map when a chart point is clicked',
   zoomToParcelTip: 'When clicking a data point in the chart, automatically zoom the map in on the parcel(s) belonging to that person.'
 }
