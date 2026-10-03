@@ -104,7 +104,7 @@ export const getTargetJimuMapViews = (): any[] => {
       const inst = MapViewManager.getInstance()
       if (inst && !managers.includes(inst)) managers.push(inst)
     }
-  } catch (e) {}
+  } catch (e) { }
 
   // 2. Try window globals used by ArcGIS Experience Builder
   if (typeof window !== 'undefined') {
@@ -113,10 +113,10 @@ export const getTargetJimuMapViews = (): any[] => {
     if (win._appWindow?._mapViewManager && !managers.includes(win._appWindow._mapViewManager)) managers.push(win._appWindow._mapViewManager)
     try {
       if (win.parent?._mapViewManager && !managers.includes(win.parent._mapViewManager)) managers.push(win.parent._mapViewManager)
-    } catch (e) {}
+    } catch (e) { }
     try {
       if (win.top?._mapViewManager && !managers.includes(win.top._mapViewManager)) managers.push(win.top._mapViewManager)
-    } catch (e) {}
+    } catch (e) { }
   }
 
   const views: any[] = []
@@ -129,7 +129,7 @@ export const getTargetJimuMapViews = (): any[] => {
         all.forEach((v: any) => {
           if (v && !views.includes(v)) views.push(v)
         })
-      } catch (e) {}
+      } catch (e) { }
     }
 
     // B. Inspect jimuMapViewGroups directly
@@ -254,7 +254,7 @@ export const extractExtentFromRecords = (
           geometries.push(rg)
           inspectGeom(rg)
         }
-      } catch (e) {}
+      } catch (e) { }
     }
   }
 
@@ -288,7 +288,7 @@ export const clearPreviousMapSelection = (targetViews?: any[]): void => {
     const handle = activeHighlightHandles.pop()
     try {
       handle?.remove?.()
-    } catch (e) {}
+    } catch (e) { }
   }
 
   // 2. Clear selections and close popups on all active map views
@@ -296,15 +296,15 @@ export const clearPreviousMapSelection = (targetViews?: any[]): void => {
   views.forEach((jmv: any) => {
     try {
       jmv?.clearSelectedFeatures?.()
-    } catch (e) {}
+    } catch (e) { }
     const view = jmv?.view
     if (view) {
       try {
         view.popup?.close?.()
-      } catch (e) {}
+      } catch (e) { }
       try {
         view.graphics?.removeAll?.()
-      } catch (e) {}
+      } catch (e) { }
     }
   })
 }
@@ -356,7 +356,7 @@ const flashGraphicsOnView = (view: any, graphics: any[], GraphicClass?: any): vo
           symbol,
           attributes: g.attributes
         })
-      } catch (e) {}
+      } catch (e) { }
     }
     return {
       geometry: g.geometry,
@@ -374,13 +374,13 @@ const flashGraphicsOnView = (view: any, graphics: any[], GraphicClass?: any): vo
       setTimeout(() => {
         try {
           view.graphics.removeMany(flashItems)
-        } catch (e) {}
+        } catch (e) { }
         flashCount++
         if (flashCount < maxFlashes) {
           setTimeout(doFlash, 300)
         }
       }, 400)
-    } catch (e) {}
+    } catch (e) { }
   }
 
   doFlash()
@@ -441,7 +441,7 @@ export const setupPopupComparisonHandler = (
   if (view.popup._compareActionHandle?.remove) {
     try {
       view.popup._compareActionHandle.remove()
-    } catch (e) {}
+    } catch (e) { }
   }
   try {
     view.popup._compareActionHandle = view.popup.on('trigger-action', (event: any) => {
@@ -455,7 +455,7 @@ export const setupPopupComparisonHandler = (
         openComparisonPopup(view, feature, cfg.originDataSource, cfg.comparisonOptions)
       }
     })
-  } catch (e) {}
+  } catch (e) { }
 
   // 2. Global click delegation across all documents (captures clicks across the app and iframes)
   const win = window as any
@@ -469,16 +469,16 @@ export const setupPopupComparisonHandler = (
   }
   try {
     if (win.top?.document && !targetDocs.includes(win.top.document)) targetDocs.push(win.top.document)
-  } catch (e) {}
+  } catch (e) { }
   try {
     if (win.parent?.document && !targetDocs.includes(win.parent.document)) targetDocs.push(win.parent.document)
-  } catch (e) {}
+  } catch (e) { }
 
   if (win._pycGlobalClickHandler) {
     targetDocs.forEach(d => {
       try {
         d.removeEventListener('click', win._pycGlobalClickHandler, true)
-      } catch (e) {}
+      } catch (e) { }
     })
   }
 
@@ -539,7 +539,7 @@ export const setupPopupComparisonHandler = (
   targetDocs.forEach(d => {
     try {
       d.addEventListener('click', handleGlobalClick, true)
-    } catch (e) {}
+    } catch (e) { }
   })
 
 }
@@ -595,7 +595,7 @@ export const openComparisonPopup = (
           popupDom = found
           break
         }
-      } catch (e) {}
+      } catch (e) { }
     }
   }
 
@@ -647,6 +647,8 @@ export const openComparisonPopup = (
   mainContainer.style.setProperty('min-height', '540px', 'important')
   mainContainer.style.setProperty('height', '580px', 'important')
   mainContainer.style.setProperty('position', 'relative', 'important')
+  mainContainer.style.setProperty('background', '#f0f0f0', 'important')
+  mainContainer.style.setProperty('background-color', '#f0f0f0', 'important')
 
   const posContainer = popupDom?.querySelector('.esri-popup__position-container') as HTMLElement
   if (posContainer) {
@@ -670,12 +672,13 @@ export const openComparisonPopup = (
     max-height: 100% !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
-    background: #0f172a !important;
-    color: #f8fafc !important;
+    background: #f0f0f0 !important;
+    background-color: #f0f0f0 !important;
+    color: #1e293b !important;
     z-index: 99999 !important;
     border-radius: 8px !important;
     box-sizing: border-box !important;
-    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5) !important;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15) !important;
     display: block !important;
   `
 
@@ -689,7 +692,7 @@ export const openComparisonPopup = (
     if (unmountCallback) {
       try {
         unmountCallback()
-      } catch (e) {}
+      } catch (e) { }
       unmountCallback = null
     }
 
@@ -700,6 +703,8 @@ export const openComparisonPopup = (
       mainContainer.style.removeProperty('min-width')
       mainContainer.style.removeProperty('min-height')
       mainContainer.style.removeProperty('height')
+      mainContainer.style.removeProperty('background')
+      mainContainer.style.removeProperty('background-color')
     }
 
     if (posContainer) {
@@ -720,7 +725,7 @@ export const openComparisonPopup = (
     cleanup()
     try {
       activeView.popup.close()
-    } catch (e) {}
+    } catch (e) { }
   }
 
   // Watch for popup close to ensure cleanup
@@ -731,7 +736,7 @@ export const openComparisonPopup = (
         cleanup()
         try {
           visibleWatcher?.remove?.()
-        } catch (e) {}
+        } catch (e) { }
       }
     })
   }
@@ -795,7 +800,7 @@ export const unregisterGlobalPopupComparisonHandler = (): void => {
     for (const d of docs) {
       d.querySelectorAll('.pyc-incontent-banner').forEach((el: Element) => { el.remove() })
     }
-  } catch (e) {}
+  } catch (e) { }
 }
 
 export const registerGlobalPopupComparisonHandler = (
@@ -876,7 +881,7 @@ export const zoomMapToRecords = async (
         ExtentClass = modules?.[0]
         GraphicClass = modules?.[1]
       }
-    } catch (e) {}
+    } catch (e) { }
 
     for (const jimuMapView of targetViews) {
       const view = jimuMapView?.view
@@ -913,7 +918,7 @@ export const zoomMapToRecords = async (
             }
           })
         }
-      } catch (e) {}
+      } catch (e) { }
 
       // Prepare graphics for popup and zoom
       const popupGraphics = graphics.map(g => {
@@ -921,7 +926,7 @@ export const zoomMapToRecords = async (
         if (GraphicClass && !(g instanceof GraphicClass) && typeof GraphicClass.fromJSON === 'function') {
           try {
             graphic = GraphicClass.fromJSON(g)
-          } catch (e) {}
+          } catch (e) { }
         }
         if (matchingLayer && !graphic.layer) {
           graphic.layer = matchingLayer
@@ -979,7 +984,7 @@ export const zoomMapToRecords = async (
               await zoomToUtils.zoomTo(view, popupGraphics, {
                 scale: isPoint ? 2500 : undefined
               })
-            } catch (e) {}
+            } catch (e) { }
           }
         }
       }
@@ -989,7 +994,7 @@ export const zoomMapToRecords = async (
         if (autoZoomToParcel) {
           flashGraphicsOnView(view, popupGraphics, GraphicClass)
         }
-      } catch (flashErr) {}
+      } catch (flashErr) { }
 
       // 4. Highlight the new parcel (sole selection) on the layerView
       try {
@@ -1001,16 +1006,16 @@ export const zoomMapToRecords = async (
                 activeHighlightHandles.push(handle)
               }
             }
-          }).catch(() => {})
+          }).catch(() => { })
         }
-      } catch (highlightErr) {}
+      } catch (highlightErr) { }
 
       // 5. Open pop-up on the newly selected parcel (AFTER camera positioning completes)
       try {
         if (openPopup && popupGraphics.length) {
           const popupLocation = centerPoint || (popupGraphics[0]?.geometry?.type === 'point' ? popupGraphics[0].geometry : (popupGraphics[0]?.geometry?.extent?.center || null))
           if (view.popup) {
-            try { view.popup.autoCloseEnabled = false } catch (_) {}
+            try { view.popup.autoCloseEnabled = false } catch (_) { }
             view.popup.open({
               features: popupGraphics,
               location: popupLocation
@@ -1099,7 +1104,7 @@ export const selectAndZoomToPerson = async (
           originDataSource.selectRecordsByIds(ids)
           setTimeout(() => { if (internalSelectionGuard) internalSelectionGuard.current = false }, 1000)
         }
-      } catch (e) {}
+      } catch (e) { }
 
       // With the map response switched off, the map is left exactly as the user
       // left it. Opening a pop-up here would gather every parcel belonging to the
@@ -1292,7 +1297,7 @@ const useSelection = (
             if (res?.records?.length) {
               rec = res.records[0]
             }
-          } catch (e) {}
+          } catch (e) { }
         }
       }
 

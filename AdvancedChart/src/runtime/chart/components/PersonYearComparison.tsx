@@ -625,7 +625,7 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
   const isBearish = summary?.overallDirection === 'down'
 
   const strokeColor = isBearish ? '#ef4444' : '#10b981'
-  const gradientStart = isBearish ? 'rgba(239, 68, 68, 0.35)' : 'rgba(16, 185, 129, 0.35)'
+  const gradientStart = isBearish ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)'
   const gradientEnd = isBearish ? 'rgba(239, 68, 68, 0.0)' : 'rgba(16, 185, 129, 0.0)'
 
   return (
@@ -634,8 +634,9 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
       style={{
         direction: 'rtl',
         fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Cairo", sans-serif',
-        background: '#0f172a',
-        color: '#f8fafc',
+        background: '#f0f0f0',
+        backgroundColor: '#f0f0f0',
+        color: '#1e293b',
         borderRadius: '8px',
         padding: '16px',
         width: '100%',
@@ -644,27 +645,52 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
       }}
     >
       <style>{`
+        .person-year-comparison-popup { 
+          background: #f0f0f0 !important; 
+          background-color: #f0f0f0 !important; 
+          color: #1e293b !important;
+        }
         .person-year-comparison-popup * { box-sizing: border-box; }
-        .pyc-badge-up { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
-        .pyc-badge-down { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
-        .pyc-badge-neutral { background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.3); }
-        .pyc-row:hover { background: rgba(255, 255, 255, 0.06) !important; }
-        .pyc-btn-back:hover { background: rgba(255, 255, 255, 0.12) !important; color: #ffffff !important; }
+        .pyc-badge-up { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
+        .pyc-badge-down { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
+        .pyc-badge-neutral { background: #e2e8f0; color: #475569; border: 1px solid #cbd5e1; }
+        .pyc-row { background: #ffffff !important; border: 1px solid #e2e8f0 !important; }
+        .pyc-row:hover { background: #f8fafc !important; border-color: #cbd5e1 !important; box-shadow: 0 2px 6px rgba(0,0,0,0.06) !important; }
+        .pyc-btn-back { background: #ffffff !important; border: 1px solid #cbd5e1 !important; color: #334155 !important; }
+        .pyc-btn-back:hover { background: #f1f5f9 !important; color: #0f172a !important; border-color: #94a3b8 !important; }
         .pyc-node-halo { transition: all 0.2s ease-in-out; }
-        .esri-popup--comparison-mode { min-width: 500px !important; max-width: 580px !important; width: 540px !important; }
-        .esri-popup--comparison-mode .esri-popup__content { margin: 0 !important; padding: 0 !important; max-height: 560px !important; overflow-y: auto !important; }
+        .esri-popup--comparison-mode,
+        .esri-popup--comparison-mode .esri-popup__main-container,
+        .esri-popup--comparison-mode .esri-popup__content,
+        .esri-popup--comparison-mode .esri-popup__header,
+        .esri-popup--comparison-mode .esri-popup__footer,
+        .esri-popup--comparison-mode .esri-popup__pointer-direction { 
+          min-width: 500px !important; 
+          max-width: 580px !important; 
+          width: 540px !important; 
+          background: #f0f0f0 !important; 
+          background-color: #f0f0f0 !important; 
+        }
+        .esri-popup--comparison-mode .esri-popup__content { 
+          margin: 0 !important; 
+          padding: 0 !important; 
+          max-height: 560px !important; 
+          overflow-y: auto !important; 
+          background: #f0f0f0 !important; 
+          background-color: #f0f0f0 !important; 
+        }
       `}</style>
 
       {/* Top Header Actions */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', paddingBottom: '10px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
         <button
           type='button'
           onClick={onBack}
           className='pyc-btn-back'
           style={{
-            background: 'rgba(255, 255, 255, 0.08)',
-            border: '1px solid rgba(255, 255, 255, 0.15)',
-            color: '#cbd5e1',
+            background: '#ffffff',
+            border: '1px solid #cbd5e1',
+            color: '#334155',
             borderRadius: '6px',
             padding: '4px 10px',
             fontSize: '12px',
@@ -673,14 +699,14 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
             alignItems: 'center',
             gap: '6px',
             fontWeight: 500,
-            transition: 'background 0.2s'
+            transition: 'all 0.2s'
           }}
         >
           <span>➔</span>
           <span>رجوع لتفاصيل القطعة</span>
         </button>
 
-        <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>
+        <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>
           📊 مقارنة سنوات الرفع
         </span>
 
@@ -691,7 +717,7 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
             style={{
               background: 'transparent',
               border: 'none',
-              color: '#94a3b8',
+              color: '#64748b',
               fontSize: '16px',
               cursor: 'pointer',
               padding: '2px 6px',
@@ -708,32 +734,32 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
       <div style={{ marginBottom: '14px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
           <span style={{ fontSize: '18px' }}>👤</span>
-          <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#ffffff' }}>
+          <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>
             {personName}
           </h3>
         </div>
-        <div style={{ fontSize: '12px', color: '#94a3b8', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+        <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
           {airportName && (
-            <span>📍 <strong>المطار:</strong> {airportName}</span>
+            <span>📍 <strong style={{ color: '#334155' }}>المطار:</strong> {airportName}</span>
           )}
           {summary && (
-            <span>📅 <strong>سنوات الرفع:</strong> {summary.startYear} - {summary.latestYear}</span>
+            <span>📅 <strong style={{ color: '#334155' }}>سنوات الرفع:</strong> {summary.startYear} - {summary.latestYear}</span>
           )}
         </div>
       </div>
 
       {loading && (
-        <div style={{ padding: '40px 20px', textAlign: 'center', color: '#94a3b8' }}>
-          <div style={{ display: 'inline-block', width: '28px', height: '28px', border: '3px solid rgba(255,255,255,0.2)', borderTopColor: '#38bdf8', borderRadius: '50%', animation: 'spin 0.8s linear infinite', marginBottom: '12px' }} />
+        <div style={{ padding: '40px 20px', textAlign: 'center', color: '#64748b' }}>
+          <div style={{ display: 'inline-block', width: '28px', height: '28px', border: '3px solid #cbd5e1', borderTopColor: '#0284c7', borderRadius: '50%', animation: 'spin 0.8s linear infinite', marginBottom: '12px' }} />
           <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
           <div style={{ fontSize: '13px' }}>جاري تجميع بيانات المقارنة لسنوات الرفع...</div>
         </div>
       )}
 
       {error && !loading && (
-        <div style={{ padding: '24px 16px', textAlign: 'center', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.25)', color: '#fca5a5' }}>
+        <div style={{ padding: '24px 16px', textAlign: 'center', background: '#fef2f2', borderRadius: '8px', border: '1px solid #fecaca', color: '#b91c1c' }}>
           <div style={{ fontSize: '14px', marginBottom: '6px' }}>⚠️ {error}</div>
-          <div style={{ fontSize: '12px', color: '#cbd5e1' }}>تأكد من وجود سجلات مسجلة لنفس المالك في سنوات رفع أخرى.</div>
+          <div style={{ fontSize: '12px', color: '#991b1b' }}>تأكد من وجود سجلات مسجلة لنفس المالك في سنوات رفع أخرى.</div>
         </div>
       )}
 
@@ -742,8 +768,8 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
           {/* Stock Ticker Summary Card */}
           <div
             style={{
-              background: 'rgba(255, 255, 255, 0.04)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              background: '#ffffff',
+              border: '1px solid #e2e8f0',
               borderRadius: '10px',
               padding: '12px 14px',
               display: 'flex',
@@ -751,15 +777,16 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
               justifyContent: 'space-between',
               marginBottom: '14px',
               flexWrap: 'wrap',
-              gap: '10px'
+              gap: '10px',
+              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)'
             }}
           >
             <div>
-              <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '2px' }}>
+              <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '2px' }}>
                 المساحة الحالية ({summary.latestYear})
               </div>
-              <div style={{ fontSize: '20px', fontWeight: 800, color: '#f8fafc', letterSpacing: '-0.5px' }}>
-                {summary.latestArea.toFixed(2)} <span style={{ fontSize: '12px', fontWeight: 500, color: '#94a3b8' }}>فدان</span>
+              <div style={{ fontSize: '20px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.5px' }}>
+                {summary.latestArea.toFixed(2)} <span style={{ fontSize: '12px', fontWeight: 500, color: '#64748b' }}>فدان</span>
               </div>
               <div style={{ fontSize: '11px', color: '#64748b' }}>
                 إجمالي {summary.latestParcels} قطعة
@@ -767,7 +794,7 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
             </div>
 
             <div style={{ textAlign: 'left' }}>
-              <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>
+              <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px' }}>
                 صافي التغير الإجمالي
               </div>
               <div
@@ -787,7 +814,7 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
                   {summary.overallDeltaArea > 0 ? '+' : ''}{summary.overallDeltaArea.toFixed(2)} فدان
                 </span>
                 {summary.overallPercentChange != null && (
-                  <span style={{ opacity: 0.85, fontSize: '11px' }}>
+                  <span style={{ opacity: 0.9, fontSize: '11px' }}>
                     ({summary.overallPercentChange > 0 ? '+' : ''}{summary.overallPercentChange}%)
                   </span>
                 )}
@@ -799,15 +826,16 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
           <div
             style={{
               position: 'relative',
-              background: 'rgba(15, 23, 42, 0.6)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              background: '#ffffff',
+              border: '1px solid #e2e8f0',
               borderRadius: '10px',
               padding: '8px 4px 4px 4px',
               marginBottom: '14px',
-              overflow: 'hidden'
+              overflow: 'hidden',
+              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)'
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0 10px 4px 10px', fontSize: '11px', color: '#94a3b8' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0 10px 4px 10px', fontSize: '11px', color: '#64748b' }}>
               <span>منحنى تغير المساحة بالفدان</span>
               <span>المحور: سنوات الرفع (Upload Years)</span>
             </div>
@@ -821,10 +849,6 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
                   <stop offset='0%' stopColor={gradientStart} />
                   <stop offset='100%' stopColor={gradientEnd} />
                 </linearGradient>
-                <filter id='nodeGlow' x='-30%' y='-30%' width='160%' height='160%'>
-                  <feGaussianBlur stdDeviation='3' result='blur' />
-                  <feComposite in='SourceGraphic' in2='blur' operator='over' />
-                </filter>
               </defs>
 
               {/* Horizontal Grid Lines */}
@@ -840,13 +864,13 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
                       y1={y}
                       x2={svgWidth - padRight}
                       y2={y}
-                      stroke='rgba(255, 255, 255, 0.07)'
+                      stroke='#f1f5f9'
                       strokeDasharray='3 3'
                     />
                     <text
                       x={padLeft - 8}
                       y={y + 3}
-                      fill='#64748b'
+                      fill='#94a3b8'
                       fontSize='9'
                       textAnchor='end'
                       fontFamily='monospace'
@@ -892,7 +916,7 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
                 const isHovered = hoveredIndex === idx
                 const isUp = pt.direction === 'up'
                 const isDown = pt.direction === 'down'
-                const dotColor = isDown ? '#ef4444' : (isUp ? '#10b981' : '#38bdf8')
+                const dotColor = isDown ? '#ef4444' : (isUp ? '#10b981' : '#0284c7')
 
                 return (
                   <g
@@ -904,7 +928,7 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
                     {/* Invisible larger hit target */}
                     <circle cx={pt.x} cy={pt.y} r='14' fill='transparent' />
 
-                    {/* Outer Glow Halo on Hover */}
+                    {/* Outer Halo on Hover */}
                     {isHovered && (
                       <circle
                         cx={pt.x}
@@ -913,19 +937,18 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
                         fill='none'
                         stroke={dotColor}
                         strokeWidth='2'
-                        opacity='0.6'
+                        opacity='0.4'
                       />
                     )}
 
-                    {/* Node Dot */}
+                    {/* Node Dot with crisp white outline on white card */}
                     <circle
                       cx={pt.x}
                       cy={pt.y}
                       r={isHovered ? '6' : '4.5'}
                       fill={dotColor}
-                      stroke='#0f172a'
-                      strokeWidth='2'
-                      filter='url(#nodeGlow)'
+                      stroke='#ffffff'
+                      strokeWidth='2.5'
                     />
 
                     {/* Small Arrow indicator above/below node */}
@@ -946,7 +969,7 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
                     <text
                       x={pt.x}
                       y={padTop + plotHeight + 18}
-                      fill={isHovered ? '#ffffff' : '#94a3b8'}
+                      fill={isHovered ? '#0f172a' : '#64748b'}
                       fontSize='10'
                       fontWeight={isHovered ? 'bold' : 'normal'}
                       textAnchor='middle'
@@ -965,23 +988,24 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
                   position: 'absolute',
                   top: '12px',
                   right: '12px',
-                  background: 'rgba(15, 23, 42, 0.92)',
-                  border: '1px solid rgba(255, 255, 255, 0.18)',
+                  background: '#0f172a',
+                  border: '1px solid #334155',
                   borderRadius: '6px',
                   padding: '6px 10px',
                   fontSize: '11px',
                   lineHeight: '1.4',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                  color: '#ffffff',
+                  boxShadow: '0 4px 14px rgba(0,0,0,0.15)',
                   pointerEvents: 'none'
                 }}
               >
-                <div style={{ fontWeight: 700, color: '#f8fafc', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '2px', marginBottom: '3px' }}>
+                <div style={{ fontWeight: 700, color: '#ffffff', borderBottom: '1px solid rgba(255, 255, 255, 0.15)', paddingBottom: '2px', marginBottom: '3px' }}>
                   📅 سنة الرفع: {activePoint.year}
                 </div>
-                <div>المساحة: <strong>{activePoint.totalArea} فدان</strong></div>
-                <div>القطع: <strong>{activePoint.parcelCount} قطعة</strong></div>
+                <div>المساحة: <strong style={{ color: '#ffffff' }}>{activePoint.totalArea} فدان</strong></div>
+                <div>القطع: <strong style={{ color: '#ffffff' }}>{activePoint.parcelCount} قطعة</strong></div>
                 {activePoint.direction !== 'baseline' && (
-                  <div style={{ color: activePoint.direction === 'up' ? '#34d399' : '#f87171', fontWeight: 600 }}>
+                  <div style={{ color: activePoint.direction === 'up' ? '#4ade80' : '#f87171', fontWeight: 600 }}>
                     {activePoint.direction === 'up' ? '▲ زيادة' : '▼ نقص'}: {activePoint.deltaArea > 0 ? '+' : ''}{activePoint.deltaArea} فدان
                     {activePoint.percentChange != null && ` (${activePoint.percentChange}%)`}
                   </div>
@@ -992,7 +1016,7 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
 
           {/* Year-by-Year Breakdown List */}
           <div>
-            <div style={{ fontSize: '12px', fontWeight: 700, color: '#cbd5e1', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ fontSize: '12px', fontWeight: 700, color: '#0f172a', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span>📋</span>
               <span>سجل التطور السنوي لقطع الأراضي والمساحات:</span>
             </div>
@@ -1014,8 +1038,8 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
-                      background: isRowHovered ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.03)',
-                      border: isRowHovered ? '1px solid rgba(255, 255, 255, 0.2)' : '1px solid rgba(255, 255, 255, 0.06)',
+                      background: '#ffffff',
+                      border: '1px solid #e2e8f0',
                       borderRadius: '8px',
                       padding: '8px 12px',
                       fontSize: '12px',
@@ -1027,12 +1051,14 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: '70px' }}>
                       <span
                         style={{
-                          background: isRowHovered ? '#38bdf8' : '#334155',
-                          color: isRowHovered ? '#0f172a' : '#f8fafc',
+                          background: isRowHovered ? '#0284c7' : '#f1f5f9',
+                          color: isRowHovered ? '#ffffff' : '#334155',
+                          border: isRowHovered ? '1px solid #0284c7' : '1px solid #cbd5e1',
                           padding: '2px 8px',
                           borderRadius: '4px',
                           fontWeight: 700,
-                          fontSize: '11px'
+                          fontSize: '11px',
+                          transition: 'all 0.15s'
                         }}
                       >
                         {d.year}
@@ -1040,13 +1066,13 @@ export const PersonYearComparison = (props: PersonYearComparisonProps): React.Re
                     </div>
 
                     {/* Parcels count */}
-                    <div style={{ color: '#cbd5e1', minWidth: '80px' }}>
+                    <div style={{ color: '#334155', minWidth: '80px' }}>
                       <span style={{ color: '#94a3b8' }}>➔ </span>
                       <strong>{d.parcelCount}</strong> قطعة
                     </div>
 
                     {/* Total Area */}
-                    <div style={{ fontWeight: 700, color: '#f8fafc', minWidth: '95px' }}>
+                    <div style={{ fontWeight: 700, color: '#0f172a', minWidth: '95px' }}>
                       <span style={{ color: '#94a3b8' }}>➔ </span>
                       <strong>{d.totalArea}</strong> فدان
                     </div>
