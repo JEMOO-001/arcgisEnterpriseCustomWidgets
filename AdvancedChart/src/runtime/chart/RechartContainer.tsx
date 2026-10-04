@@ -921,17 +921,6 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
           if (!active) return
           // An unanswerable query must not erase an answer we already had, or a
           // momentary failure would drop the inner chart back to the outer one.
-          ;(window as any)._pycScope = {
-            count: scope?.count ?? '(unresolved)',
-            value: scope?.value,
-            field: triggerField,
-            where: appliedWhere ?? '(none)',
-            dsId: dataSourceId,
-            mainDsId: mainDataSourceId,
-            dsQueries: dsInfo?.widgetQueries ? JSON.stringify(dsInfo.widgetQueries) : '(none)',
-            mainQueries: mainDsInfo?.widgetQueries ? JSON.stringify(mainDsInfo.widgetQueries) : '(none)',
-            at: new Date().toISOString()
-          }
           if (scope) {
             hasResolvedScope.current = true
             setCategoryScope(scope)
@@ -1031,35 +1020,6 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
     if (selectedRecords.length === 1) {
       return true
     }
-
-    // TEMPORARY: one line describing why the inner chart stayed hidden. Remove once
-    // the activation path is confirmed on the portal.
-    try {
-      const queriesByDs: any = {}
-      for (const id of Object.keys(allDataSourcesInfo || {})) {
-        const wq = (allDataSourcesInfo as any)[id]?.widgetQueries
-        if (!wq) continue
-        for (const k of Object.keys(wq)) {
-          if (wq[k]?.where) queriesByDs[`${id} :: ${k}`] = wq[k].where
-        }
-      }
-      const payload = JSON.stringify({
-        triggerField,
-        dsId: dataSourceId,
-        mainDsId: mainDataSourceId,
-        dsWhere: where ?? null,
-        scope: categoryScope,
-        foundAnywhere: findCategoryFilterAnywhere(allDataSourcesInfo, triggerField) ?? null,
-        queriesByDs
-      })
-      // Only when something actually changed: this branch is the normal unfiltered
-      // state and runs on every render, so logging it each time floods the console.
-      const w = window as any
-      if (w._pycLastReason !== payload) {
-        w._pycLastReason = payload
-        console.log('[AdvancedChart] not single value', payload)
-      }
-    } catch (e) {}
 
     return false
   }, [
@@ -1529,7 +1489,13 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
     if (isSingleValue) {
       const baseTitleText = baseChart?.title?.content?.text ?? ''
       const airportToDisplay = selectedAirportName || 'اسم المطار'
-      const dynamicTitleText = formatDynamicChartTitle(airportToDisplay, configuredCount, baseTitleText)
+      // The configured number is a ceiling, not a promise. When the filtered view
+      // holds fewer entities than that, the chart draws all of them, and a title
+      // claiming "top 10" over seven bars is simply wrong. personStats is already
+      // grouped by entity over the same filter, so its size is that real total.
+      const availableCount = Object.keys(personStats || {}).length
+      const titleCount = availableCount > 0 ? Math.min(configuredCount, availableCount) : configuredCount
+      const dynamicTitleText = formatDynamicChartTitle(airportToDisplay, titleCount, baseTitleText)
 
       if (configuredCount && baseChart.dataSource?.query?.pageSize !== configuredCount) {
         baseChart = baseChart.setIn(['dataSource', 'query', 'pageSize'], configuredCount)
@@ -1554,7 +1520,7 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
     baseChart = applyValueAxisTitle(baseChart)
 
     return baseChart
-  }, [isSingleValue, rechartWebChart, webChart, selectedAirportName, configuredCount])
+  }, [isSingleValue, rechartWebChart, webChart, selectedAirportName, configuredCount, personStats])
 
   const personStatsRef = React.useRef(personStats)
   personStatsRef.current = personStats
