@@ -377,10 +377,21 @@ const CATEGORY_SCOPE_PAGE_SIZE = 5
 /** Filters and map extents can change in bursts, so let them settle before querying. */
 const CATEGORY_SCOPE_DEBOUNCE_MS = 250
 
-const readField = (record: any, field: string): any => {
+const CATEGORY_COUNT_ALIAS = 'exbCategoryCount'
+
+const readField = (record: any, field: string, allowGroupFallback: boolean = false): any => {
   const data = record?.getData?.() || {}
-  const key = Object.keys(data).find(k => k.toLowerCase() === field.toLowerCase())
-  return key ? data[key] : undefined
+  const keys = Object.keys(data)
+  const key = keys.find(k => k.toLowerCase() === field.toLowerCase())
+  if (key) return data[key]
+
+  // A grouped row carries the group value next to the statistic, and services differ
+  // on the casing and alias they echo the group field back with. Guessing is only
+  // safe on such a row: on a full record the "other column" is an arbitrary
+  // attribute, which once put an owner's name where an airport's belonged.
+  if (!allowGroupFallback) return undefined
+  const others = keys.filter(k => k.toLowerCase() !== CATEGORY_COUNT_ALIAS.toLowerCase())
+  return others.length === 1 ? data[others[0]] : undefined
 }
 
 const distinctOf = (values: any[]): { count: number, value?: string } => {
@@ -407,9 +418,106 @@ const distinctOf = (values: any[]): { count: number, value?: string } => {
  * extent or a plain feature click all narrow the data source, and all of them are
  * visible here without parsing SQL or guessing at data source names.
  */
+/**
+ * Finds a filter anywhere in the app that pins the chart's category field to one
+ * value, and returns that value.
+ *
+ * A filter does not have to land on the data source this widget is bound to. A
+ * search panel or list can register it against a sibling data source over the same
+ * layer, which is why looking only at this widget's own data source and its main
+ * one reports "unfiltered" while the chart plainly draws a single bar.
+ *
+ * Only clauses that constrain our own category field are adopted; an unrelated
+ * filter on another layer has no bearing on how many categories we are showing.
+ */
+const findCategoryFilterAnywhere = (
+  allInfo: any,
+  field: string
+): string | undefined => {
+  if (!field) return undefined
+
+  const fromWhere = (w?: string): string | undefined =>
+    w ? extractSingleFilterValue(w, field) : undefined
+
+  const manager = DataSourceManager.getInstance()
+
+  for (const dsId of Object.keys(allInfo || {})) {
+    const info = allInfo[dsId]
+    if (!info) continue
+
+    const wq = info.widgetQueries
+    if (wq && typeof wq === 'object') {
+      for (const key of Object.keys(wq)) {
+        const hit = fromWhere(wq[key]?.where)
+        if (hit !== undefined) return hit
+      }
+    }
+
+    try {
+      const ds = manager.getDataSource(dsId) as QueriableDataSource
+      const hit = fromWhere(ds?.getCurrentQueryParams?.()?.where as any)
+      if (hit !== undefined) return hit
+    } catch (e) {}
+  }
+
+  return undefined
+}
+
+/**
+ * Every where clause currently narrowing this data source, combined.
+ *
+ * A filter can arrive on the layer data source, on the main data source behind it,
+ * or as another widget's query held in the store. Measuring only one of those
+ * counts the whole layer and makes a filtered view look unfiltered.
+ */
+const collectAppliedWhere = (
+  dataSourceId: string,
+  mainDataSourceId: string,
+  dsInfo: any,
+  mainDsInfo: any,
+  allInfo?: any,
+  categoryField?: string
+): string | undefined => {
+  const clauses: string[] = []
+
+  const add = (w?: string): void => {
+    const clean = (w || '').trim()
+    if (!clean) return
+    if (/^\(?\s*1\s*=\s*1\s*\)?$/.test(clean)) return
+    if (clauses.includes(clean)) return
+    clauses.push(clean)
+  }
+
+  for (const id of [dataSourceId, mainDataSourceId]) {
+    if (!id) continue
+    try {
+      const ds = DataSourceManager.getInstance().getDataSource(id) as QueriableDataSource
+      add(ds?.getCurrentQueryParams?.()?.where as any)
+    } catch (e) {}
+  }
+
+  for (const info of [dsInfo, mainDsInfo]) {
+    const wq = info?.widgetQueries
+    if (!wq || typeof wq !== 'object') continue
+    for (const key of Object.keys(wq)) add(wq[key]?.where)
+  }
+
+  if (categoryField) {
+    const elsewhere = findCategoryFilterAnywhere(allInfo, categoryField)
+    if (elsewhere !== undefined) {
+      const quoted = /^-?\d+(?:\.\d+)?$/.test(elsewhere) ? elsewhere : `'${elsewhere.replace(/'/g, "''")}'`
+      add(`${categoryField} = ${quoted}`)
+    }
+  }
+
+  if (!clauses.length) return undefined
+  return clauses.length === 1 ? clauses[0] : clauses.map(c => `(${c})`).join(' AND ')
+}
+
 export async function getCategoryScope (
   ds: QueriableDataSource,
-  field: string
+  field: string,
+  whereOverride?: string
 ): Promise<{ count: number, value?: string } | undefined> {
   if (!ds || !field) return undefined
 
@@ -422,8 +530,8 @@ export async function getCategoryScope (
   if (typeof ds.query !== 'function') return undefined
 
   const current: any = ds.getCurrentQueryParams?.() || {}
-  const params = {
-    where: current.where || '1=1',
+  const base = {
+    where: whereOverride || current.where || '1=1',
     geometry: current.geometry,
     geometryType: current.geometryType,
     spatialRel: current.spatialRel,
@@ -431,18 +539,61 @@ export async function getCategoryScope (
     units: current.units,
     time: current.time,
     gdbVersion: current.gdbVersion,
-    groupByFieldsForStatistics: [field],
-    outStatistics: [{
-      statisticType: 'count',
-      onStatisticField: field,
-      outStatisticFieldName: 'exbCategoryCount'
-    }],
     returnGeometry: false,
     pageSize: CATEGORY_SCOPE_PAGE_SIZE
-  } as unknown as FeatureLayerQueryParams
+  }
 
-  const result = await ds.query(params)
-  return distinctOf((result?.records ?? []).map(r => readField(r, field)))
+  // One row per distinct value, so the row count is the answer on its own. Reading
+  // the value out of the row is only needed for the title, and a service that
+  // echoes the group field under an unexpected name must not be able to turn
+  // "one category" into "none".
+  try {
+    const grouped = await ds.query({
+      ...base,
+      groupByFieldsForStatistics: [field],
+      outStatistics: [{
+        statisticType: 'count',
+        onStatisticField: field,
+        outStatisticFieldName: CATEGORY_COUNT_ALIAS
+      }]
+    } as unknown as FeatureLayerQueryParams)
+
+    const rows = grouped?.records ?? []
+    if (rows.length) {
+      const byValue = distinctOf(rows.map(r => readField(r, field, true)))
+      return { count: rows.length, value: rows.length === 1 ? byValue.value : undefined }
+    }
+  } catch (e) {}
+
+  // Some services reject a grouped statistic on a text field. Distinct values give
+  // the same answer without one.
+  try {
+    const distinct = await ds.query({
+      ...base,
+      outFields: [field],
+      returnDistinctValues: true
+    } as unknown as FeatureLayerQueryParams)
+
+    const rows = distinct?.records ?? []
+    if (rows.length) {
+      const byValue = distinctOf(rows.map(r => readField(r, field)))
+      return { count: byValue.count || rows.length, value: byValue.value }
+    }
+  } catch (e) {}
+
+  // Last resort: read a few records and count the distinct values in memory.
+  try {
+    const plain = await ds.query({ ...base, outFields: [field] } as unknown as FeatureLayerQueryParams)
+    const rows = plain?.records ?? []
+    if (rows.length) {
+      const byValue = distinctOf(rows.map(r => readField(r, field)))
+      if (byValue.count) return byValue
+    }
+  } catch (e) {}
+
+  // Genuinely unknown. Returning a zero count here would read as "many" and pin the
+  // outer chart on screen, so say nothing and let the other signals decide.
+  return undefined
 }
 
 export const isFieldFilteredToSingleValue = (where?: string, targetField?: string): boolean => {
@@ -715,7 +866,19 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
     return (webChart?.dataSource?.query?.groupByFieldsForStatistics?.[0]) || (webChart?.series?.[0] as any)?.x
   }, [webChart])
 
-  const triggerField = rechartConfig?.filterField || primaryCategoryField
+  // What the inner chart itself groups by. It can never be the thing that triggers
+  // the inner chart: the trigger is the outer chart's category, drilled into.
+  const rechartCategoryField = React.useMemo(() => {
+    return (rechartWebChart?.dataSource?.query?.groupByFieldsForStatistics?.[0]) || (rechartWebChart?.series?.[0] as any)?.x
+  }, [rechartWebChart])
+
+  // The configured trigger is honoured unless it names the inner chart's own
+  // category, which is a natural misreading of the setting and leaves the widget
+  // watching the wrong field for a filter that will never appear on it.
+  const configuredTrigger = rechartConfig?.filterField
+  const triggerField = (configuredTrigger && configuredTrigger !== rechartCategoryField)
+    ? configuredTrigger
+    : primaryCategoryField
 
   const dataSourceId = useDataSource?.dataSourceId
   const mainDataSourceId = React.useMemo(() => {
@@ -730,27 +893,61 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
 
   const dsInfo = ReactRedux.useSelector((state: IMState) => state.dataSourcesInfo?.[dataSourceId])
   const mainDsInfo = ReactRedux.useSelector((state: IMState) => state.dataSourcesInfo?.[mainDataSourceId])
+  // A filter can be registered against a data source this widget is not bound to,
+  // so the whole map is needed to find one that constrains our category field.
+  const allDataSourcesInfo = ReactRedux.useSelector((state: IMState) => state.dataSourcesInfo)
 
   // What the data source actually holds right now, re-read whenever anything that
   // narrows it changes. This is the signal the inner chart switches on, so the
   // behaviour no longer depends on how a given experience wires its filtering.
   const [categoryScope, setCategoryScope] = React.useState<{ count: number, value?: string } | null>(null)
+  const hasResolvedScope = React.useRef(false)
 
   React.useEffect(() => {
     if (!rechartEnabled || !dataSourceId || !triggerField) {
+      hasResolvedScope.current = false
       setCategoryScope(null)
       return
     }
 
     let active = true
-    const timer = setTimeout(() => {
+
+    const resolve = (): void => {
       const ds = DataSourceManager.getInstance().getDataSource(dataSourceId) as QueriableDataSource
       if (!ds) return
-      getCategoryScope(ds, triggerField)
-        .then(scope => { if (active) setCategoryScope(scope ?? null) })
-        .catch(() => { if (active) setCategoryScope(null) })
-    }, CATEGORY_SCOPE_DEBOUNCE_MS)
+      const appliedWhere = collectAppliedWhere(dataSourceId, mainDataSourceId, dsInfo, mainDsInfo, allDataSourcesInfo, triggerField)
+      getCategoryScope(ds, triggerField, appliedWhere)
+        .then(scope => {
+          if (!active) return
+          // An unanswerable query must not erase an answer we already had, or a
+          // momentary failure would drop the inner chart back to the outer one.
+          ;(window as any)._pycScope = {
+            count: scope?.count ?? '(unresolved)',
+            value: scope?.value,
+            field: triggerField,
+            where: appliedWhere ?? '(none)',
+            dsId: dataSourceId,
+            mainDsId: mainDataSourceId,
+            dsQueries: dsInfo?.widgetQueries ? JSON.stringify(dsInfo.widgetQueries) : '(none)',
+            mainQueries: mainDsInfo?.widgetQueries ? JSON.stringify(mainDsInfo.widgetQueries) : '(none)',
+            at: new Date().toISOString()
+          }
+          if (scope) {
+            hasResolvedScope.current = true
+            setCategoryScope(scope)
+          }
+        })
+        .catch(() => {})
+    }
 
+    // The debounce exists to absorb bursts of filter and extent changes. Making the
+    // very first answer wait for it just shows the wrong chart while it ticks.
+    if (!hasResolvedScope.current) {
+      resolve()
+      return () => { active = false }
+    }
+
+    const timer = setTimeout(resolve, CATEGORY_SCOPE_DEBOUNCE_MS)
     return () => {
       active = false
       clearTimeout(timer)
@@ -758,12 +955,14 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
   }, [
     rechartEnabled,
     dataSourceId,
+    mainDataSourceId,
     triggerField,
     dsInfo?.filterVersion,
     dsInfo?.sourceVersion,
     dsInfo?.gdbVersion,
     dsInfo?.selectedIds,
     dsInfo?.widgetQueries,
+    allDataSourcesInfo,
     mainDsInfo?.filterVersion,
     mainDsInfo?.sourceVersion,
     mainDsInfo?.gdbVersion,
@@ -807,6 +1006,12 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
       return true
     }
 
+    // 3b. The same kind of filter, but registered against another data source over
+    // the same layer, which is where a search panel or list widget tends to put it.
+    if (findCategoryFilterAnywhere(allDataSourcesInfo, triggerField) !== undefined) {
+      return true
+    }
+
     // 4. The data source itself has narrowed to a single category value.
     // This is the general case and covers every route to it: a filter action, a
     // select action, a list widget, a map extent or a plain feature click. The
@@ -827,6 +1032,35 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
       return true
     }
 
+    // TEMPORARY: one line describing why the inner chart stayed hidden. Remove once
+    // the activation path is confirmed on the portal.
+    try {
+      const queriesByDs: any = {}
+      for (const id of Object.keys(allDataSourcesInfo || {})) {
+        const wq = (allDataSourcesInfo as any)[id]?.widgetQueries
+        if (!wq) continue
+        for (const k of Object.keys(wq)) {
+          if (wq[k]?.where) queriesByDs[`${id} :: ${k}`] = wq[k].where
+        }
+      }
+      const payload = JSON.stringify({
+        triggerField,
+        dsId: dataSourceId,
+        mainDsId: mainDataSourceId,
+        dsWhere: where ?? null,
+        scope: categoryScope,
+        foundAnywhere: findCategoryFilterAnywhere(allDataSourcesInfo, triggerField) ?? null,
+        queriesByDs
+      })
+      // Only when something actually changed: this branch is the normal unfiltered
+      // state and runs on every render, so logging it each time floods the console.
+      const w = window as any
+      if (w._pycLastReason !== payload) {
+        w._pycLastReason = payload
+        console.log('[AdvancedChart] not single value', payload)
+      }
+    } catch (e) {}
+
     return false
   }, [
     rechartEnabled,
@@ -835,6 +1069,7 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
     triggerField,
     dsInfo,
     mainDsInfo,
+    allDataSourcesInfo,
     categoryScope
   ])
 
