@@ -1,0 +1,16 @@
+/build/
+/dist/
+/node_modules/
+/work/*
+!/work/check-types.cjs
+!/work/local-media-proxy.cjs
+!/work/check-local-media-proxy.cjs
+.env
+.env.*
+!.env.example
+*.log
+*.tsbuildinfo
+*.key
+*.pem
+*.cert
+.DS_Store

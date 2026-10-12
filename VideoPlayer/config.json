@@ -1,0 +1,14 @@
+{
+  "sourceMode": "direct",
+  "featureLayerUrl": "",
+  "relationshipId": null,
+  "fileNameField": "VideoFileName",
+  "titleField": "",
+  "presignedUrlEndpoint": "/api/media/presigned-url",
+  "apiBaseUrl": "https://localhost:9052",
+  "tokenMode": "viewer",
+  "sharedBearerToken": "",
+  "responseUrlField": "url",
+  "expiryHours": 24,
+  "useHttps": true
+}
