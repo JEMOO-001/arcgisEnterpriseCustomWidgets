@@ -9,6 +9,10 @@ test('an endpoint path uses the local bridge by default, including older saved c
   expect(resolvePlaybackEndpoint({ presignedUrlEndpoint: '' })).toBe('https://localhost:9052/api/media/presigned-url')
 })
 
+test('empty automatic-backend settings use the automatic local endpoint', () => {
+  expect(resolvePlaybackEndpoint({ tokenMode: 'proxy', presignedUrlEndpoint: '', apiBaseUrl: '' })).toBe('https://localhost:9053/api/media/playback-url')
+})
+
 test('a path uses a configured HTTPS host and a complete endpoint overrides it', () => {
   expect(resolvePlaybackEndpoint({ apiBaseUrl: 'https://media.example', presignedUrlEndpoint: '/api/media/presigned-url' })).toBe('https://media.example/api/media/presigned-url')
   expect(resolvePlaybackEndpoint({ apiBaseUrl: 'https://localhost:9052', presignedUrlEndpoint: 'https://production.example/sign' })).toBe('https://production.example/sign')
@@ -24,10 +28,11 @@ test.each([
   expect(() => resolvePlaybackEndpoint(configuration)).toThrow('HTTPS')
 })
 
-test('playback sends the bearer request to the resolved bridge address', async () => {
+test('automatic playback sends no bearer token to the configured backend', async () => {
   const fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ success: true, url: 'http://minio.example/video.mp4?sig=a%2Fb' }) })
   global.fetch = fetchMock
   await expect(requestPlaybackUrl({ config: defaults, video: { fileName: 'gis/media/video.mp4', title: 'Video' }, token: 'test-token', signal: new AbortController().signal }))
     .resolves.toBe('https://minio.example/video.mp4?sig=a%2Fb')
-  expect(fetchMock.mock.calls[0][0]).toBe('https://localhost:9052/api/media/presigned-url')
+  expect(fetchMock.mock.calls[0][0]).toBe('https://localhost:9053/api/media/playback-url')
+  expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined()
 })

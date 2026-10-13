@@ -24,7 +24,7 @@ export function usePlayback (config: Config) {
     pending.current = controller
     setLoading(true)
     let timedOut = false
-    const timeout = window.setTimeout(() => { timedOut = true; controller.abort() }, 30000)
+    const timeout = window.setTimeout(() => { timedOut = true; controller.abort() }, config.tokenMode === 'proxy' ? 90000 : 30000)
     try {
       const playback = await requestPlaybackUrl({ config, video, token, signal: controller.signal })
       if (requestSequence === sequence.current && !controller.signal.aborted) setUrl(playback)

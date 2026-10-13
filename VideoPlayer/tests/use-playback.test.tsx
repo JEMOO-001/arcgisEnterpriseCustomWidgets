@@ -6,7 +6,7 @@ const defaults = jest.requireActual<Config>('../config.json')
 
 jest.mock('jimu-core', () => ({ React: jest.requireActual<typeof React>('react') }))
 
-const config: Config = { ...defaults, sourceMode: 'related', responseUrlField: 'url', presignedUrlEndpoint: 'https://media.example/api/media/presigned-url' }
+const config: Config = { ...defaults, tokenMode: 'viewer', sourceMode: 'related', responseUrlField: 'url', presignedUrlEndpoint: 'https://media.example/api/media/presigned-url' }
 
 test('a previous video request cannot replace the more recently requested video', async () => {
   let finishFirst: (response: unknown) => void

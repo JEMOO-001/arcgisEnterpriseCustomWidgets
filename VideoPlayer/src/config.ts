@@ -8,7 +8,7 @@ export interface Config {
   titleField: string
   presignedUrlEndpoint: string
   apiBaseUrl?: string
-  tokenMode?: 'viewer' | 'shared'
+  tokenMode?: 'viewer' | 'shared' | 'proxy'
   sharedBearerToken?: string
   responseUrlField: 'url' | 'localUrl' | 'apnUrl'
   expiryHours: number

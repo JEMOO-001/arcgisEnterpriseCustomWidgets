@@ -1,0 +1,24 @@
+# Automatic video playback backend
+
+The widget submits `{ "fileName": "gis/media/id.mp4", "expiryHours": 24 }` to `POST /api/media/playback-url`. It does not submit a bearer token, username, or password. This backend signs in to FOE Identity, caches the access session, refreshes it on demand before expiry, and keeps the rotated refresh token. After a refresh session expires or is revoked, the next playback request signs in again. Simultaneous viewers share one authentication request. A media 401 renews the session and retries once. Account disablement, password changes, MFA requirements, and identity outages still require owner intervention.
+
+Only successful playback fields are returned. Identity tokens, refresh tokens, passwords, and account profiles are not returned to viewers, stored on disk, or logged. The credentials supplied to the service remain in its process environment. Restarting the service creates a new session on the next request.
+
+## Local test
+
+Requires Node.js 20 or newer. Set `VIDEO_PROXY_EMAIL` and `VIDEO_PROXY_PASSWORD` in the process environment, then run `node backend/server.cjs` from the installed widget folder. The default endpoint is `https://localhost:9053/api/media/playback-url`; the service listens only on `127.0.0.1`. It uses the existing Developer Edition server certificate unless certificate environment variables are set. Certificate verification remains enabled.
+
+In the widget settings, select **Automatic login through backend**. For local testing use API base `https://localhost:9053` and playback endpoint `/api/media/playback-url`. Existing widget instances need this one-time settings change and save/publish; re-adding the widget is unnecessary.
+
+## Windows datacenter server
+
+1. Copy this entire `backend` folder from DEV to a protected service folder on the always-on Windows server. It needs no npm packages or Experience Builder installation. Install a supported Node.js runtime if none is available.
+2. Configure the environment entries in `.env.example` through your Windows service manager or existing secret-management process. The template is not loaded automatically. Keep the real account credentials private to the service account and server administrators. Configure the identity/media addresses, exact Experience Builder origin(s), allowed video folder, and backend TLS key/certificate paths. Use a playback-only service account where available. Origin filtering alone is not user authorization.
+3. Register `node.exe` with `server.cjs` as a Windows service using your approved service manager, with automatic startup/recovery. Do not use a terminal on an employee's computer as the shared service.
+4. Expose the loopback HTTPS listener through your existing HTTPS gateway or IIS reverse proxy. Publish only `POST/OPTIONS /api/media/playback-url`; do not expose the identity login/refresh service through this proxy. Require authentication and restrict access to the intended app audience at the gateway. For example, IIS Windows authentication can authorize your permitted Windows/domain group. The widget sends browser credentials to support that gateway; its CORS responses allow credentials only for configured origins. The service itself has no user-login or authorization middleware, so an anonymous/public forwarding rule is not a production deployment.
+5. Preserve the request Origin header. If a gateway adds a `/video-api` prefix, remove that prefix when forwarding to the backend. Use a valid certificate for the public backend hostname and a valid/trusted backend certificate on the proxy-to-service connection. Configure the gateway timeout for the initial login/renewal request (the widget allows up to 90 seconds).
+6. Set the widget's API base to the deployed internal HTTPS backend address and the endpoint to `/api/media/playback-url` (or enter its complete HTTPS URL). Select **Automatic login through backend**, then save and publish the Experience Builder app.
+
+GitHub Pages hosts only the static widget bundle on main. It cannot run this Node service or hold its private credentials. The service code belongs on DEV and is deployed to the Windows server separately. The backend uses plain HTTP to the currently supplied internal identity/media addresses; replace them with internal HTTPS addresses when your infrastructure provides them.
+
+The default allowed folder is `gis/media/`; requests outside it, traversal paths, oversized bodies, and lifetimes outside 1–168 hours are rejected before authentication. Set a different folder prefix only on the server if your uploaded file references use another folder.

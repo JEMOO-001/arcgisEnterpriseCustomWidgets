@@ -2,7 +2,7 @@ import { playbackUrl, requestPlaybackUrl, videoRecords } from '../src/runtime/vi
 import { type Config } from '../src/config'
 const defaults = jest.requireActual<Config>('../config.json')
 
-const config: Config = { ...defaults, sourceMode: 'related', responseUrlField: 'url', presignedUrlEndpoint: 'https://media.example/api/media/presigned-url' }
+const config: Config = { ...defaults, tokenMode: 'viewer', sourceMode: 'related', responseUrlField: 'url', presignedUrlEndpoint: 'https://media.example/api/media/presigned-url' }
 const video = { fileName: 'gis/media/a video.mp4', title: 'Entrance' }
 
 afterEach(() => { jest.restoreAllMocks() })

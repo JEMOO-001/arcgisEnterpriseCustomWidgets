@@ -4,7 +4,7 @@ import { Alert, Button, Select, TextInput, NumericInput, Switch } from 'jimu-ui'
 import { JimuMapViewComponent, type JimuMapView } from 'jimu-arcgis'
 import { MapWidgetSelector, SettingSection, SettingRow } from 'jimu-ui/advanced/setting-components'
 import { type Config, type IMConfig } from '../config'
-import { defaultEndpointPath, localApiBaseUrl, resolvePlaybackEndpoint } from '../playback-endpoint'
+import { automaticApiBaseUrl, automaticEndpointPath, defaultEndpointPath, localApiBaseUrl, resolvePlaybackEndpoint } from '../playback-endpoint'
 import { useMapFields } from './use-map-fields'
 import { featureServiceLayerUrl, mediaAccessToken } from '../runtime/video-service'
 
@@ -18,8 +18,18 @@ export default function Setting (props: AllWidgetSettingProps<IMConfig>) {
   const update = <K extends keyof Config,>(key: K, next: Config[K]) => {
     props.onSettingChange({ id: props.id, config: config.set(key, next) })
   }
+  const changeAuthentication = (mode: Config['tokenMode']) => {
+    let next = config.merge({ tokenMode: mode, sharedBearerToken: '' })
+    if (mode === 'proxy' && (!config.presignedUrlEndpoint || config.presignedUrlEndpoint === defaultEndpointPath || config.presignedUrlEndpoint === `${localApiBaseUrl}${defaultEndpointPath}`)) {
+      next = next.set('presignedUrlEndpoint', automaticEndpointPath)
+      if (!config.apiBaseUrl || config.apiBaseUrl === localApiBaseUrl) next = next.set('apiBaseUrl', automaticApiBaseUrl)
+    } else if (mode !== 'proxy' && config.presignedUrlEndpoint === automaticEndpointPath && config.apiBaseUrl === automaticApiBaseUrl) {
+      next = next.merge({ presignedUrlEndpoint: defaultEndpointPath, apiBaseUrl: localApiBaseUrl })
+    }
+    props.onSettingChange({ id: props.id, config: next })
+  }
   const textField = (key: 'presignedUrlEndpoint' | 'apiBaseUrl', label: string, hint?: string) => <SettingRow flow="wrap" label={label}>
-    <TextInput className="w-100" aria-label={label} defaultValue={config[key] || (key === 'apiBaseUrl' ? localApiBaseUrl : defaultEndpointPath)} key={`${key}-${config[key]}`} onAcceptValue={text => { update(key, text.trim()) }} />
+    <TextInput className="w-100" aria-label={label} defaultValue={config[key] || (key === 'apiBaseUrl' ? config.tokenMode === 'proxy' ? automaticApiBaseUrl : localApiBaseUrl : config.tokenMode === 'proxy' ? automaticEndpointPath : defaultEndpointPath)} key={`${key}-${config[key]}`} onAcceptValue={text => { update(key, text.trim()) }} />
     {hint ? <small className="mt-1">{hint}</small> : null}
   </SettingRow>
   const fieldDropdown = (key: 'fileNameField' | 'titleField', label: string) => <SettingRow flow="wrap" label={label}>
@@ -82,18 +92,21 @@ export default function Setting (props: AllWidgetSettingProps<IMConfig>) {
     </SettingSection>
     <SettingSection title="Playback API">
       {textField('apiBaseUrl', 'API base address', 'Preset for the local HTTPS test bridge. Change it to your HTTPS API host when deploying.')}
-      {textField('presignedUrlEndpoint', 'Presigned-URL endpoint', 'Use /api/media/presigned-url or a full HTTPS address. A full address overrides the API base.')}
+      {textField('presignedUrlEndpoint', 'Playback endpoint', config.tokenMode === 'proxy' ? 'Use /api/media/playback-url on the automatic-auth backend, or its full HTTPS address.' : 'Use /api/media/presigned-url or a full HTTPS address. A full address overrides the API base.')}
       {endpointError ? <Alert type="error" text={endpointError} /> : <small className="d-block" style={{ overflowWrap: 'anywhere' }}>Request address: {endpointPreview}</small>}
       <small className="d-block mt-1">For localhost:9052, keep the local test bridge running.</small>
       <SettingRow flow="wrap" label="Media API authentication">
         <Select className="w-100" aria-label="Media API authentication" value={config.tokenMode || 'viewer'}
-          onChange={event => { props.onSettingChange({ id: props.id, config: config.merge({ tokenMode: event.target.value as Config['tokenMode'], sharedBearerToken: '' }) }) }}>
+          onChange={event => { changeAuthentication(event.target.value as Config['tokenMode']) }}>
+          <option value="proxy">Automatic login through backend</option>
           <option value="viewer">Each viewer enters a token</option>
           <option value="shared">Shared token in app</option>
         </Select>
       </SettingRow>
-      {config.tokenMode === 'shared'
-        ? <div>
+      {config.tokenMode === 'proxy'
+        ? <Alert type="info" text="Viewers only click Play Video. The backend logs in and renews tokens automatically. Credentials belong in the backend environment, not this app. Local testing uses https://localhost:9053; shared use needs the deployed backend address." />
+        : config.tokenMode === 'shared'
+          ? <div>
         <SettingRow flow="wrap" label="Shared bearer token">
           <TextInput className="w-100" aria-label="Shared bearer token" type="password" autoComplete="off" spellCheck={false}
             value={sharedTokenDraft} onChange={event => { setSharedTokenDraft(event.target.value) }}
@@ -103,7 +116,7 @@ export default function Setting (props: AllWidgetSettingProps<IMConfig>) {
         </SettingRow>
         <Alert type="warning" text="This token is included in the app configuration and can be read by anyone who can load the app. Masking this field does not keep it secret. Use a server-side proxy if the token must stay private." />
       </div>
-        : <small>Viewers enter their own token when playing. It is kept only in memory for their widget session.</small>}
+          : <small>Viewers enter their own token when playing. It is kept only in memory for their widget session.</small>}
       <SettingRow flow="wrap" label="URL response field">
         <Select aria-label="URL response field" className="w-100" value={config.responseUrlField}
           onChange={event => { update('responseUrlField', event.target.value as Config['responseUrlField']) }}>

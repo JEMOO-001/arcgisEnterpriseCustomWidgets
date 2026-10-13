@@ -45,6 +45,7 @@ interface PlaybackRequest {
 }
 
 export function mediaAccessToken (config: Pick<Config, 'tokenMode' | 'sharedBearerToken'>, viewerToken: string): string {
+  if (config.tokenMode === 'proxy') return ''
   const value = config.tokenMode === 'shared' ? config.sharedBearerToken : viewerToken
   return (value || '').trim().replace(/^Bearer(?:\s+|$)/i, '').trim()
 }
@@ -53,15 +54,15 @@ export async function requestPlaybackUrl ({ config, video, token, signal }: Play
   if (/^\s*https?:\/\//i.test(video.fileName)) throw new Error('The video field contains a web address. Store the fileName returned by the upload API, such as gis/media/video.mp4.')
   const endpoint = resolvePlaybackEndpoint(config)
   const accessToken = mediaAccessToken(config, token)
-  if (!accessToken) throw new Error(config.tokenMode === 'shared' ? 'The app owner must configure the shared media token in the widget settings.' : 'Enter your media API access token to play this video.')
+  if (config.tokenMode !== 'proxy' && !accessToken) throw new Error(config.tokenMode === 'shared' ? 'The app owner must configure the shared media token in the widget settings.' : 'Enter your media API access token to play this video.')
   const response = await fetch(endpoint, {
     method: 'POST',
     signal,
-    credentials: 'omit',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${accessToken}` },
+    credentials: config.tokenMode === 'proxy' ? 'include' : 'omit',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(config.tokenMode === 'proxy' ? {} : { Authorization: `Bearer ${accessToken}` }) },
     body: JSON.stringify({ fileName: video.fileName, expiryHours: config.expiryHours })
   })
-  if (response.status === 401 || response.status === 403) throw new Error(config.tokenMode === 'shared' ? 'The shared media token has expired or was rejected. Ask the app owner to replace it in the widget settings.' : 'The media API rejected your access token. Enter a valid token and try again.')
+  if (response.status === 401 || response.status === 403) throw new Error(config.tokenMode === 'proxy' ? 'The automatic playback backend rejected this app request. Ask the app owner to check backend access settings.' : config.tokenMode === 'shared' ? 'The shared media token has expired or was rejected. Ask the app owner to replace it in the widget settings.' : 'The media API rejected your access token. Enter a valid token and try again.')
   if (!response.ok) throw new Error(`The media API could not create a playback URL (HTTP ${response.status}). Try again.`)
   const payload = await response.json() as { success?: boolean, url?: string, localUrl?: string, apnUrl?: string }
   const address = payload?.[config.responseUrlField]

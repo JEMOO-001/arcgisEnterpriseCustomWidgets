@@ -109,6 +109,26 @@ test('shared authentication opens playback without a viewer token prompt and sen
   expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer shared-test-token')
 })
 
+test('automatic backend authentication opens playback without any app token or viewer prompt', async () => {
+  const fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ success: true, url: 'https://minio.example/automatic.mp4' }) })
+  global.fetch = fetchMock
+  showWidget({ tokenMode: 'proxy', sharedBearerToken: '' })
+  await waitFor(() => { expect(mockOpenPlayer).toBeDefined() })
+  act(() => { mockOpenPlayer(videos) })
+  await waitFor(() => { expect(screen.getByTitle('Entrance').getAttribute('src')).toBe('https://minio.example/automatic.mp4') })
+  expect(screen.queryByLabelText('Media API access token')).toBeNull()
+  expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined()
+})
+
+test('a rejected automatic backend request never asks the viewer for a media token', async () => {
+  global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 403 })
+  showWidget({ tokenMode: 'proxy', sharedBearerToken: '' })
+  await waitFor(() => { expect(mockOpenPlayer).toBeDefined() })
+  act(() => { mockOpenPlayer(videos) })
+  await waitFor(() => { expect(screen.getByText(/automatic playback backend rejected/)).toBeTruthy() })
+  expect(screen.queryByLabelText('Media API access token')).toBeNull()
+})
+
 test('a rejected shared token asks the owner to update settings without asking viewers for credentials', async () => {
   global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 401 })
   showWidget({ tokenMode: 'shared', sharedBearerToken: 'expired-test-token' })

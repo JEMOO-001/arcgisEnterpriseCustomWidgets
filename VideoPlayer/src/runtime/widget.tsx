@@ -37,6 +37,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [selectedIndex, setSelectedIndex] = React.useState(0)
   const [token, setToken] = React.useState('')
   const sharedTokenMode = props.config.tokenMode === 'shared'
+  const automaticMode = props.config.tokenMode === 'proxy'
   const accessToken = mediaAccessToken(props.config, token)
   const controller = React.useRef<PopupVideoController>(null)
   const playback = usePlayback(props.config)
@@ -50,7 +51,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const openPlayer = (videos: VideoRecord[]) => {
     setSelectedIndex(0)
     setDialogOpen(true)
-    if (videos.length === 1 && accessToken) void playback.play(videos[0], accessToken)
+    if (videos.length === 1 && (automaticMode || accessToken)) void playback.play(videos[0], accessToken)
   }
   const callbacks = React.useRef({ closePlayer, openPlayer })
   callbacks.current = { closePlayer, openPlayer }
@@ -115,7 +116,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           </div>
             : <p className="mb-0">{selectedVideo?.title}</p>}
         </div>
-        {!sharedTokenMode && !playback.url
+        {!automaticMode && !sharedTokenMode && !playback.url
           ? <div className="mb-3">
           <label htmlFor={tokenInputId}>Media API access token</label>
           <TextInput id={tokenInputId} type="password" value={token} autoComplete="off" spellCheck={false}
@@ -123,7 +124,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           <small>Kept in memory for this widget session.</small>
         </div>
           : null}
-        <Button type="primary" disabled={!selectedVideo || !accessToken || playback.loading}
+        <Button type="primary" disabled={!selectedVideo || (!automaticMode && !accessToken) || playback.loading}
           onClick={() => { if (selectedVideo) void playback.play(selectedVideo, accessToken) }}>
           {playback.loading ? 'Preparing video…' : playback.url ? 'Request fresh URL' : 'Play video'}
         </Button>
