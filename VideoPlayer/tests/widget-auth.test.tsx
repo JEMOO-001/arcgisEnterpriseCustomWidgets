@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type * as ReactTypes from 'react'
 import { React, type AllWidgetProps } from 'jimu-core'
 import Widget from '../src/runtime/widget'
@@ -9,10 +9,19 @@ const defaults = jest.requireActual<Config>('../config.json')
 const mockMapView = { view: {}, whenJimuMapViewLoaded: async () => null }
 const videos = [{ fileName: 'gis/media/a.mp4', title: 'Entrance' }]
 let mockOpenPlayer: (videos: VideoRecord[]) => void
+let mockAppMode = 'RUN'
+let mockChangeSelection: (selection: unknown) => void
+const mockRefreshSelection = jest.fn()
 
 jest.mock('jimu-core', () => {
   const react = jest.requireActual<typeof ReactTypes>('react')
-  return { React: react, jsx: react.createElement, css: () => '' }
+  return {
+    React: react,
+    jsx: react.createElement,
+    css: () => '',
+    AppMode: { Design: 'DESIGN', Run: 'RUN' },
+    ReactRedux: { useSelector: (selector: (state: unknown) => unknown) => selector({ appRuntimeInfo: { appMode: mockAppMode } }) }
+  }
 })
 
 jest.mock('jimu-arcgis', () => {
@@ -44,10 +53,12 @@ jest.mock('../src/runtime/popup-controller', () => ({
   default: class {
     constructor (connection: { onSelection: (selection: unknown) => void, onPlay: (videos: VideoRecord[]) => void }) {
       mockOpenPlayer = connection.onPlay
+      mockChangeSelection = connection.onSelection
       connection.onSelection({ status: 'ready', videos })
     }
 
     destroy = jest.fn()
+    refreshSelection = mockRefreshSelection
   }
 }))
 
@@ -60,7 +71,32 @@ function showWidget (changes: Partial<Config>) {
   render(<Widget {...props} />)
 }
 
-beforeEach(() => { mockOpenPlayer = undefined })
+beforeEach(() => { mockOpenPlayer = undefined; mockAppMode = 'RUN' })
+
+test('a configured widget renders no standalone status panel in the running app while retaining its popup action', async () => {
+  showWidget({})
+  await waitFor(() => { expect(mockOpenPlayer).toBeDefined() })
+  expect(screen.queryByRole('heading', { name: 'Feature videos' })).toBeNull()
+  expect(screen.queryByRole('status')).toBeNull()
+  expect(screen.queryByText(/Select a feature on the map/)).toBeNull()
+})
+
+test('the builder retains the setup panel so the widget can be selected and configured', async () => {
+  mockAppMode = 'DESIGN'
+  showWidget({})
+  await waitFor(() => { expect(mockOpenPlayer).toBeDefined() })
+  expect(screen.getByRole('heading', { name: 'Feature videos' })).toBeTruthy()
+  expect(screen.getByRole('status').textContent).toContain('Use Play Video in the map popup')
+})
+
+test('lookup failures still provide feedback and a retry control in the running app', async () => {
+  showWidget({})
+  await waitFor(() => { expect(mockOpenPlayer).toBeDefined() })
+  act(() => { mockChangeSelection({ status: 'error', videos: [], message: 'Layer unavailable' }) })
+  expect(screen.getByText('Layer unavailable')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Retry video lookup' }))
+  expect(mockRefreshSelection).toHaveBeenCalledTimes(1)
+})
 
 test('shared authentication opens playback without a viewer token prompt and sends the configured token', async () => {
   const fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ success: true, url: 'https://minio.example/video.mp4' }) })

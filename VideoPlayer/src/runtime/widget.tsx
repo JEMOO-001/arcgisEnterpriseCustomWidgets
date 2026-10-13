@@ -1,5 +1,5 @@
 /** @jsx jsx */
-import { React, jsx, css, type AllWidgetProps } from 'jimu-core'
+import { React, ReactRedux, AppMode, jsx, css, type AllWidgetProps, type IMState } from 'jimu-core'
 import { Alert, Button, Modal, ModalBody, ModalHeader, Select, TextInput } from 'jimu-ui'
 import { JimuMapViewComponent, type JimuMapView } from 'jimu-arcgis'
 import { type IMConfig } from '../config'
@@ -30,6 +30,7 @@ function configurationError (config: IMConfig): string {
 }
 
 export default function Widget (props: AllWidgetProps<IMConfig>) {
+  const inDesignMode = ReactRedux.useSelector((state: IMState) => state.appRuntimeInfo.appMode === AppMode.Design)
   const [mapView, setMapView] = React.useState<JimuMapView>(null)
   const [selection, setSelection] = React.useState<VideoSelection>({ status: 'idle', videos: [] })
   const [dialogOpen, setDialogOpen] = React.useState(false)
@@ -82,20 +83,25 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [mapView, props.config, props.id, setupError])
 
   const selectedVideo = selection.videos[selectedIndex]
+  const showStatusPanel = inDesignMode || !mapWidgetId || Boolean(setupError) || selection.status === 'error'
   const statusText = selection.status === 'loading'
     ? 'Checking this feature’s videos…'
     : selection.status === 'ready'
       ? selection.videos.length ? `${selection.videos.length} video${selection.videos.length === 1 ? '' : 's'} available. Use Play Video in the map popup.` : 'This feature has no videos.'
       : mapView ? 'Select a feature on the map to view its videos.' : 'Waiting for the connected map…'
 
-  return <div className="widget-video-player p-3" css={playerStyle}>
+  return <React.Fragment>
     {mapWidgetId ? <JimuMapViewComponent useMapWidgetId={mapWidgetId} onActiveViewChange={setMapView} /> : null}
-    <h5>Feature videos</h5>
-    {!mapWidgetId || setupError
-      ? <Alert type="info" text={!mapWidgetId ? 'Choose a Map widget in the settings.' : setupError} />
-      : selection.status === 'error'
-        ? <div><Alert type="error" text={selection.message} /><Button className="mt-2" onClick={() => { controller.current?.refreshSelection() }}>Retry video lookup</Button></div>
-        : <p role="status" aria-live="polite">{statusText}</p>}
+    {showStatusPanel
+      ? <div className="widget-video-player p-3" css={playerStyle}>
+      <h5>Feature videos</h5>
+      {!mapWidgetId || setupError
+        ? <Alert type="info" text={!mapWidgetId ? 'Choose a Map widget in the settings.' : setupError} />
+        : selection.status === 'error'
+          ? <div><Alert type="error" text={selection.message} /><Button className="mt-2" onClick={() => { controller.current?.refreshSelection() }}>Retry video lookup</Button></div>
+          : <p role="status" aria-live="polite">{statusText}</p>}
+    </div>
+      : null}
     <Modal isOpen={dialogOpen} toggle={closePlayer} size="lg" centered labelledBy={playerTitleId}>
       <ModalHeader id={playerTitleId} toggle={closePlayer}>Feature videos</ModalHeader>
       <ModalBody css={playerStyle}>
@@ -129,5 +135,5 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           : null}
       </ModalBody>
     </Modal>
-  </div>
+  </React.Fragment>
 }
