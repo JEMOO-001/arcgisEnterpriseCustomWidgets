@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Category dropdown stacking regression</title>
+  <link rel="stylesheet" href="/widget.css">
+  <style>
+    body { margin: 24px; font-family: Arial, sans-serif; color: #222; }
+    .fixture { max-width: 820px; }
+    .grid-col-item, .widget-renderer, .widget-content { position: relative; }
+    .widget-renderer, .widget-content { z-index: 0; }
+    .header-content { display: flex; gap: 16px; padding: 12px; background: #163648; }
+    .category { flex: 1; min-width: 0; }
+    .map-list { height: 360px; padding: 24px; background: #ddd; }
+    .map-list .widget-content { height: 100%; background: #bac5c8; padding: 12px; }
+  </style>
+</head>
+<body>
+  <p>Stacking regression fixture — sample categories, no Portal data.</p>
+  <main class="fixture">
+    <div class="grid-col-item" data-testid="header-layer">
+      <div class="widget-renderer" data-testid="panel-layer">
+        <div class="widget-content header-content">
+          <div class="widget-renderer category" data-testid="first-category">
+            <div class="widget-content">
+              <div class="widget-list-custom" dir="rtl">
+                <div class="dropdown-wrapper">
+                  <button type="button" class="dropdown-btn" aria-expanded="false">اختر المحافظة <span class="chevron">▼</span></button>
+                  <ul class="dropdown-list">
+                    <li class="dropdown-item">كل المحافظات</li>
+                    <li class="dropdown-item">محافظة القاهرة</li>
+                    <li class="dropdown-item">محافظة الجيزة</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="widget-renderer category" data-testid="second-category">
+            <div class="widget-content">
+              <div class="widget-list-custom" dir="rtl">
+                <div class="dropdown-wrapper">
+                  <button type="button" class="dropdown-btn" aria-expanded="false">اختر النشاط <span class="chevron">▼</span></button>
+                  <ul class="dropdown-list">
+                    <li class="dropdown-item">كل الأنشطة</li>
+                    <li class="dropdown-item">زراعة</li>
+                    <li class="dropdown-item">صناعة</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="grid-col-item map-list" data-testid="map-list-layer">
+      <div class="widget-renderer"><div class="widget-content">Map/List sibling — must not cover an open dropdown.</div></div>
+    </div>
+  </main>
+  <script>
+    const wrappers = Array.from(document.querySelectorAll('.dropdown-wrapper'));
+    const closeMenu = wrapper => {
+      wrapper.querySelector('.dropdown-list').classList.remove('show');
+      wrapper.querySelector('button').classList.remove('open');
+      wrapper.querySelector('button').setAttribute('aria-expanded', 'false');
+    };
+    wrappers.forEach(wrapper => {
+      wrapper.querySelector('button').addEventListener('click', () => {
+        const open = wrapper.querySelector('.dropdown-list').classList.toggle('show');
+        wrapper.querySelector('button').classList.toggle('open', open);
+        wrapper.querySelector('button').setAttribute('aria-expanded', String(open));
+      });
+      wrapper.querySelectorAll('li').forEach(item => item.addEventListener('click', () => closeMenu(wrapper)));
+    });
+    document.addEventListener('click', event => {
+      wrappers.filter(wrapper => !wrapper.contains(event.target)).forEach(closeMenu);
+    }, true);
+  </script>
+</body>
+</html>
