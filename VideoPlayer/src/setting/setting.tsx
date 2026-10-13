@@ -91,9 +91,14 @@ export default function Setting (props: AllWidgetSettingProps<IMConfig>) {
       {metadata.error ? <div><Alert type="error" text={metadata.error} /><Button className="mt-2" onClick={metadata.retry}>Read fields again</Button></div> : null}
     </SettingSection>
     <SettingSection title="Playback API">
-      {textField('apiBaseUrl', 'API base address', 'Preset for the local HTTPS test bridge. Change it to your HTTPS API host when deploying.')}
-      {textField('presignedUrlEndpoint', 'Playback endpoint', config.tokenMode === 'proxy' ? 'Use /api/media/playback-url on the automatic-auth backend, or its full HTTPS address.' : 'Use /api/media/presigned-url or a full HTTPS address. A full address overrides the API base.')}
+      <Button className="mb-2" onClick={() => {
+        props.onSettingChange({ id: props.id, config: config.merge({ apiBaseUrl: 'http://172.20.70.34:9051', presignedUrlEndpoint: defaultEndpointPath, tokenMode: config.tokenMode === 'proxy' ? 'shared' : config.tokenMode || 'shared' }) })
+      }}>Use direct media API</Button>
+      <small className="d-block mb-2">Sets the direct 172.20.70.34:9051 API address. Configure a bearer token below. The browser may block HTTP requests from this HTTPS app.</small>
+      {textField('apiBaseUrl', 'API base address', 'Enter your API host. HTTP is accepted for testing; HTTPS is needed when the browser blocks mixed content.')}
+      {textField('presignedUrlEndpoint', 'Playback endpoint', config.tokenMode === 'proxy' ? 'Use /api/media/playback-url on the automatic-auth backend, or its full address.' : 'Use /api/media/presigned-url or a full address. A full address overrides the API base.')}
       {endpointError ? <Alert type="error" text={endpointError} /> : <small className="d-block" style={{ overflowWrap: 'anywhere' }}>Request address: {endpointPreview}</small>}
+      {endpointPreview?.startsWith('http:') ? <Alert type="warning" text="Direct HTTP request selected. Your HTTPS app may be blocked by browser mixed-content or local-network restrictions before the API responds. Returned video URLs are upgraded separately." /> : null}
       <small className="d-block mt-1">For localhost:9052, keep the local test bridge running.</small>
       <SettingRow flow="wrap" label="Media API authentication">
         <Select className="w-100" aria-label="Media API authentication" value={config.tokenMode || 'viewer'}

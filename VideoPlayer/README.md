@@ -34,7 +34,15 @@ In automatic-backend mode, viewers see no media-token input even when the backen
 
 Each play or **Request fresh URL** click sends a new POST with `{ "fileName": "<stored reference>", "expiryHours": 24 }` (using the configured lifetime). A successful response must contain `success: true` and the configured URL field. Closing the player stops it. Expired or rejected tokens produce a message for the viewer or app owner, according to the authentication mode.
 
-The player is an iframe controlled by this widget, not the separate stock Embed widget. Popup action placement is managed by ArcGIS 4.30; a dedicated top-title-bar button is not implemented. The widget preserves existing popup actions.
+The player uses the browser's native video element with controls so loading, network, and decoding failures can be reported. The video format and codec must be supported by the viewer's browser. Popup action placement is managed by ArcGIS 4.30; a dedicated top-title-bar button is not implemented. The widget preserves existing popup actions.
+
+## Direct API testing and playback errors
+
+In **Playback API**, click **Use direct media API** to select `http://172.20.70.34:9051/api/media/presigned-url`. This bypasses localhost and selects shared-token authentication when switching from automatic-backend mode. Enter your bearer token under **Shared token in app**, or choose per-viewer authentication. Existing saved settings remain until you change them. Arbitrary HTTP/HTTPS API hosts can also be configured manually.
+
+HTTP endpoints are accepted for testing. An HTTPS app's browser may block the HTTP API request as mixed content or under local-network policy before a response is received. Accepting HTTP in settings does not override browser security. For normal HTTPS deployment, use an HTTPS API with a trusted certificate and suitable CORS, or the server-hosted HTTPS gateway. Converting the returned video URL's `http://` prefix to `https://` is still performed separately and preserves the signed path/query bytes.
+
+The player shows request and response progress, then video-host loading and playback status. Errors identify **Configuration**, **Feature data/lookup**, **API request**, **API authentication** (HTTP 401/403), **API response** (HTTP status, invalid JSON, or missing URL), **Playback URL**, or **Video loading** (browser media error code). A native media error does not reveal the exact HTTP failure or prove a codec issue; inspect the video request in the browser Network tab. Likewise, JavaScript cannot distinguish every connection, certificate, CORS, or browser-policy failure from a rejected fetch; the request error lists checks and directs you to Console/Network. Timeout messages identify the API preparation stage. Error messages do not include bearer tokens, raw server responses, or signed video URLs.
 
 Lookup errors appear in the widget with a retry control. Incomplete related-record responses produce an error instead of displaying an incomplete video list. This version handles FeatureLayer-backed popup features from one configured service layer per widget instance.
 

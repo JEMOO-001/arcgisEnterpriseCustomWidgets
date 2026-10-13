@@ -13,9 +13,9 @@ export function resolvePlaybackEndpoint (config: Pick<Config, 'presignedUrlEndpo
     const endpoint = address.startsWith('/')
       ? new URL(address, config.apiBaseUrl?.trim() || (config.tokenMode === 'proxy' ? automaticApiBaseUrl : localApiBaseUrl))
       : new URL(address)
-    if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password) throw new Error('Invalid API address.')
+    if (!['https:', 'http:'].includes(endpoint.protocol) || endpoint.username || endpoint.password) throw new Error('Invalid API address.')
     return endpoint.href
   } catch {
-    throw new Error('Use an HTTPS API base address with an endpoint path, or enter a complete HTTPS endpoint.')
+    throw new Error('[Configuration] Use an HTTP or HTTPS API base address with an endpoint path, or enter a complete endpoint URL.')
   }
 }

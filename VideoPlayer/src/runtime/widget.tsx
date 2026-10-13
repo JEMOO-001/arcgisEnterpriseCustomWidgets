@@ -36,6 +36,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [dialogOpen, setDialogOpen] = React.useState(false)
   const [selectedIndex, setSelectedIndex] = React.useState(0)
   const [token, setToken] = React.useState('')
+  const [videoError, setVideoError] = React.useState('')
+  const [videoStatus, setVideoStatus] = React.useState('')
   const sharedTokenMode = props.config.tokenMode === 'shared'
   const automaticMode = props.config.tokenMode === 'proxy'
   const accessToken = mediaAccessToken(props.config, token)
@@ -46,6 +48,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const mapWidgetId = props.useMapWidgetIds?.[0]
   const tokenInputId = `${props.id}-media-token`
   const playerTitleId = `${props.id}-player-title`
+
+  React.useEffect(() => {
+    setVideoError('')
+    setVideoStatus(playback.url ? '3. Playback URL received. Connecting to the video host…' : '')
+  }, [playback.url])
 
   const closePlayer = () => { playback.clear(); setDialogOpen(false) }
   const openPlayer = (videos: VideoRecord[]) => {
@@ -97,9 +104,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       ? <div className="widget-video-player p-3" css={playerStyle}>
       <h5>Feature videos</h5>
       {!mapWidgetId || setupError
-        ? <Alert type="info" text={!mapWidgetId ? 'Choose a Map widget in the settings.' : setupError} />
+        ? <Alert type="info" text={!mapWidgetId ? '[Configuration] Choose a Map widget in the settings.' : setupError.startsWith('[') ? setupError : `[Configuration] ${setupError}`} />
         : selection.status === 'error'
-          ? <div><Alert type="error" text={selection.message} /><Button className="mt-2" onClick={() => { controller.current?.refreshSelection() }}>Retry video lookup</Button></div>
+          ? <div><Alert type="error" text={`[Feature lookup] ${selection.message}`} /><Button className="mt-2" onClick={() => { controller.current?.refreshSelection() }}>Retry video lookup</Button></div>
           : <p role="status" aria-live="polite">{statusText}</p>}
     </div>
       : null}
@@ -129,10 +136,20 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           {playback.loading ? 'Preparing video…' : playback.url ? 'Request fresh URL' : 'Play video'}
         </Button>
         {playback.error ? <Alert className="video-player-feedback" type="error" text={playback.error} /> : null}
-        {playback.loading ? <p className="video-player-feedback" role="status">Requesting a fresh playback URL…</p> : null}
+        {playback.loading ? <p className="video-player-feedback" role="status" aria-live="polite">{playback.progress || 'Preparing playback…'}</p> : null}
+        {playback.url && videoError ? <Alert className="video-player-feedback" type="error" text={videoError} /> : null}
+        {playback.url && !videoError ? <p className="video-player-feedback" role="status" aria-live="polite">{videoStatus}</p> : null}
         {playback.url
-          ? <iframe key={playback.url} className="video-player-frame mt-3" src={playback.url}
-          title={selectedVideo?.title || 'Feature video'} allow="autoplay; fullscreen; picture-in-picture" allowFullScreen referrerPolicy="no-referrer" />
+          ? <video key={playback.url} className="video-player-frame mt-3" src={playback.url}
+          title={selectedVideo?.title || 'Feature video'} controls autoPlay playsInline preload="metadata"
+          onLoadedMetadata={() => { setVideoError(''); setVideoStatus('3. Video loaded. Use the player controls if playback does not start automatically.') }}
+          onPlaying={() => { setVideoError(''); setVideoStatus('4. Playing video.') }}
+          onStalled={() => { setVideoStatus('3. Video loading stalled. Check the video-host request in the browser Network tab.') }}
+          onError={event => {
+            const code = event.currentTarget.error?.code
+            const reason = code === 1 ? 'Video loading was aborted.' : code === 2 ? 'A network error interrupted the video download.' : code === 3 ? 'The browser could not decode this video.' : code === 4 ? 'The video source is unavailable or its format/codec is unsupported.' : 'The browser could not load the video.'
+            setVideoError(`[Video loading${code ? ` — media error ${code}` : ''}] The API returned a playback URL, but playback stopped while loading or decoding the video. ${reason} Check the video request in the browser Network tab for connection, certificate, HTTP status, or expired-link details.`)
+          }} />
           : null}
       </ModalBody>
     </Modal>

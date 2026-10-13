@@ -19,13 +19,16 @@ test('a path uses a configured HTTPS host and a complete endpoint overrides it',
 })
 
 test.each([
-  { apiBaseUrl: 'http://media.example', presignedUrlEndpoint: '/api/media/presigned-url' },
   { apiBaseUrl: 'not a URL', presignedUrlEndpoint: '/api/media/presigned-url' },
   { presignedUrlEndpoint: '//other.example/sign' },
   { presignedUrlEndpoint: '/\\other.example/sign' },
   { presignedUrlEndpoint: 'https://user:password@media.example/sign' }
 ])('invalid or ambiguous API configuration is rejected: %j', configuration => {
-  expect(() => resolvePlaybackEndpoint(configuration)).toThrow('HTTPS')
+  expect(() => resolvePlaybackEndpoint(configuration)).toThrow('Configuration')
+})
+
+test('direct HTTP APIs are accepted without routing through localhost', () => {
+  expect(resolvePlaybackEndpoint({ apiBaseUrl: 'http://172.20.70.34:9051', presignedUrlEndpoint: '/api/media/presigned-url' })).toBe('http://172.20.70.34:9051/api/media/presigned-url')
 })
 
 test('automatic playback sends no bearer token to the configured backend', async () => {

@@ -43,7 +43,30 @@ test.each([401, 403, 500])('HTTP %s fails without creating a player URL', async 
   await expect(requestPlaybackUrl({ config, video, token: 'token', signal: new AbortController().signal })).rejects.toThrow()
 })
 
-test.each([{ success: false, url: 'https://minio/a.mp4' }, { success: true, localUrl: 'https://minio/a.mp4' }, null])('unsuccessful or incomplete API response %j fails', async payload => {
+test.each([{ success: false, url: 'https://minio/a.mp4' }, { success: 'true', url: 'https://minio/a.mp4' }, { success: true, localUrl: 'https://minio/a.mp4' }, null])('unsuccessful or incomplete API response %j fails', async payload => {
   global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => payload })
   await expect(requestPlaybackUrl({ config, video, token: 'token', signal: new AbortController().signal })).rejects.toThrow('configured URL field')
+})
+
+test('a blocked direct HTTP request identifies the request stage without exposing credentials or URL query', async () => {
+  global.fetch = jest.fn().mockRejectedValue(new TypeError('Failed to fetch'))
+  const directConfig = { ...config, presignedUrlEndpoint: 'http://172.20.70.34:9051/api/media/presigned-url?private=hidden' }
+  let message = ''
+  try { await requestPlaybackUrl({ config: directConfig, video, token: 'secret-test-value', signal: new AbortController().signal }) } catch (error) { message = (error as Error).message }
+  expect(global.fetch).toHaveBeenCalledWith(directConfig.presignedUrlEndpoint, expect.anything())
+  expect(message).toContain('[API request]')
+  expect(message).toContain('172.20.70.34:9051/api/media/presigned-url')
+  expect(message).toContain('browser Console and Network')
+  expect(message).not.toContain('secret-test-value')
+  expect(message).not.toContain('private=hidden')
+})
+
+test('a non-JSON API response identifies the response stage', async () => {
+  global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => { throw new SyntaxError('HTML response') } })
+  await expect(requestPlaybackUrl({ config, video, token: 'token', signal: new AbortController().signal })).rejects.toThrow('[API response] The server returned an unreadable JSON response')
+})
+
+test('an invalid returned URL is distinguished from failure to call the API', async () => {
+  global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ success: true, url: 'not a URL' }) })
+  await expect(requestPlaybackUrl({ config, video, token: 'token', signal: new AbortController().signal })).rejects.toThrow('[Playback URL]')
 })
