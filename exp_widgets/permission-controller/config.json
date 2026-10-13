@@ -20,5 +20,6 @@
         "shape": "circle"
       }
     }
-  }
+  },
+  "widgetAccess": {}
 }
