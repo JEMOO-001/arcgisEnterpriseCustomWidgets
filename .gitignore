@@ -1,6 +1,6 @@
 # This repository root is also the root of an ArcGIS Experience Builder Developer
 # Edition install, so the working directory holds far more than the widget source.
-# DEV tracks the widget source under AdvancedChart/ and nothing else.
+# DEV tracks widget sources in their root-level widget folders.
 
 # Experience Builder product files. Esri-licensed, and far too large to version.
 /client/

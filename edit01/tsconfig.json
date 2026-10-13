@@ -1,0 +1,18 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "paths": {
+      "calcite-components": ["jimu-ui/calcite-components/index"],
+      "esri/*": ["./node_modules/@arcgis/core/*"],
+      "widgets/*": ["./your-extensions/widgets/*"],
+      "arcgis-charts-components": ["./your-extensions/widgets/edit01/type-stubs/arcgis-charts-components"]
+    }
+  },
+  "include": [
+    "src/**/*",
+    "tests/**/*",
+    "../../../types",
+    "../../../jimu-core/lib/types"
+  ]
+}
