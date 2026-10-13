@@ -10,17 +10,12 @@ import { useControlledWidgets } from '../../../../../dist/widgets/common/control
 import type { IMConfig as IMEditConfig } from '../../../edit01/src/config'
 import type { IMConfig, WidgetAccessRule } from '../config'
 import { hasGenericWidgetAccess, isRestrictedGroupRule } from '../common/access'
+import { isPermissionManagedEditWidget } from '../common/edit-widget'
 import {
   hasEffectiveEditAccess,
   isViewsRestricted,
   loadCurrentUserGroupIds
 } from '../../../edit01/src/common/permission'
-
-const EDIT_WIDGET_NAME = 'edit01'
-
-const isPermissionManagedEditWidget = (widgetJson: any): boolean => {
-  return widgetJson?.manifest?.name === EDIT_WIDGET_NAME
-}
 
 export const usePermittedWidgets = (
   controllerId: string,
@@ -88,6 +83,7 @@ export const usePermittedWidgets = (
 
     Object.keys(widgets).forEach(widgetId => {
       const widgetJson = widgetJsons?.[widgetId]
+      if (!widgetJson) return
       if (!isPermissionManagedEditWidget(widgetJson)) {
         const accessRule = config?.widgetAccess?.[widgetId] as WidgetAccessRule
         if (hasGenericWidgetAccess(accessRule, groupIds, groupsReady)) {

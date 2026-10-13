@@ -1,6 +1,19 @@
 import { hasGenericWidgetAccess, isRestrictedGroupRule } from '../src/common/access'
+import { isPermissionManagedEditWidget } from '../src/common/edit-widget'
 
 describe('generic child widget access', () => {
+  it('recognizes the original Edit manifest and published Edit URI before runtime metadata loads', () => {
+    expect(isPermissionManagedEditWidget({ _originManifest: { name: 'edit01' }, manifest: { name: 'item-id' } })).toBe(true)
+    expect(isPermissionManagedEditWidget({ uri: 'https://host/exp_widgets/edit01/?version=1.15.6' })).toBe(true)
+    expect(isPermissionManagedEditWidget({ uri: 'https://host/exp_widgets/edit01-copy/' })).toBe(false)
+  })
+
+  it('keeps ordinary widgets and incomplete unrelated configurations outside Edit permission filtering', () => {
+    expect(isPermissionManagedEditWidget({ manifest: { name: 'print' }, config: {} })).toBe(false)
+    expect(isPermissionManagedEditWidget({ config: { editMode: 'ATTRIBUTE' as any, layersConfig: [] } })).toBe(false)
+    expect(isPermissionManagedEditWidget(undefined)).toBe(false)
+  })
+
   it('allows widgets without a configured rule', () => {
     expect(hasGenericWidgetAccess(undefined, [], false)).toBe(true)
   })

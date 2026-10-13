@@ -32,6 +32,7 @@ import type {
   WidgetAccessMode,
   WidgetAccessRule
 } from '../config'
+import { isPermissionManagedEditWidget } from '../common/edit-widget'
 
 type GroupScope = 'my' | 'organization'
 
@@ -129,7 +130,7 @@ const PermissionAccessSetting = (props: AllWidgetSettingProps<IMConfig>) => {
 
   const selectedWidget = controlledWidgets.find(item => item.value === selectedWidgetId)
   const selectedWidgetJson = widgetJsons?.[selectedWidgetId]
-  const isEdit01 = selectedWidgetJson?.manifest?.name === 'edit01'
+  const isEdit01 = isPermissionManagedEditWidget(selectedWidgetJson)
   const accessMap = toMutableAccessMap(config.widgetAccess)
   const storedRule = accessMap[selectedWidgetId]
   const rule: WidgetAccessRule = storedRule ?? { mode: 'everyone', groups: [] }
