@@ -63,6 +63,28 @@ describe('permission controller Edit launcher visibility', () => {
     expect(Object.keys(result.current)).toEqual(['print'])
   })
 
+  it('removes the launcher when its specific-member view is deleted, even with a matching generic group rule', () => {
+    setup('editor2')
+    const secondView = {
+      ...editorConfig.views[0], id: 'view2', allowedUsers: [{ username: 'editor2' }]
+    }
+    mockState = mockState.setIn(['appConfig', 'widgets', 'edit', 'config', 'views'],
+      [editorConfig.views[0], secondView])
+    const controllerConfig = Immutable({
+      widgetAccess: { edit: { mode: 'groups', groups: [{ id: 'shared', title: 'Editors' }] } }
+    }) as any
+    const { result, rerender } = renderHook(() => usePermittedWidgets('controller', 'controller', controllerConfig))
+    expect(Object.keys(result.current)).toEqual(['edit', 'print'])
+
+    mockState = mockState.setIn(['appConfig', 'widgets', 'edit', 'config', 'views'], [editorConfig.views[0]])
+    rerender()
+    expect(Object.keys(result.current)).toEqual(['print'])
+
+    mockState = mockState.setIn(['user', 'username'], 'editor1')
+    rerender()
+    expect(Object.keys(result.current)).toEqual(['edit', 'print'])
+  })
+
   it('still denies viewers and empty specific-member views', () => {
     setup('editor1')
     mockState = mockState.setIn(['user', 'role'], 'org_viewer')
