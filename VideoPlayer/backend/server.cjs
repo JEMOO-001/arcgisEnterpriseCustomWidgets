@@ -1,6 +1,7 @@
 const fs = require('fs')
 const path = require('path')
 const https = require('https')
+const http = require('http')
 const { createTokenManager } = require('./token-manager.cjs')
 const { createPlaybackHandler } = require('./playback-handler.cjs')
 
@@ -10,6 +11,8 @@ if (!email || !password) throw new Error('Configure VIDEO_PROXY_EMAIL and VIDEO_
 const identityBase = process.env.VIDEO_PROXY_IDENTITY_BASE_URL || 'http://172.20.70.34/identity-api/api/identity/v1/auth'
 const mediaEndpoint = process.env.VIDEO_PROXY_MEDIA_ENDPOINT || 'http://172.20.70.34:9051/api/media/presigned-url'
 const port = Number(process.env.VIDEO_PROXY_PORT || 9053)
+const transport = process.env.VIDEO_PROXY_TRANSPORT || 'https'
+if (!['http', 'https'].includes(transport)) throw new Error('VIDEO_PROXY_TRANSPORT must be http or https.')
 const allowedOrigins = (process.env.VIDEO_PROXY_ALLOWED_ORIGINS || 'https://localhost:3001').split(',').map(origin => new URL(origin.trim()).origin)
 for (const address of [identityBase, mediaEndpoint]) {
   const url = new URL(address)
@@ -21,12 +24,13 @@ if (!filePrefix || !filePrefix.endsWith('/') || filePrefix.includes('..') || fil
 const tokenManager = createTokenManager({ loginUrl: `${identityBase.replace(/\/$/, '')}/login`, refreshUrl: `${identityBase.replace(/\/$/, '')}/refresh`, email, password })
 const handle = createPlaybackHandler({ tokenManager, mediaEndpoint, allowedOrigins, filePrefix })
 const certificateFolder = path.resolve(__dirname, '../../../../../server/cert')
-const server = https.createServer({
+const onRequest = (request, response) => { void handle(request, response) }
+const server = transport === 'http' ? http.createServer(onRequest) : https.createServer({
   key: fs.readFileSync(process.env.VIDEO_PROXY_TLS_KEY_FILE || path.join(certificateFolder, 'server.key')),
   cert: fs.readFileSync(process.env.VIDEO_PROXY_TLS_CERT_FILE || path.join(certificateFolder, 'server.cert'))
-}, (request, response) => { void handle(request, response) })
+}, onRequest)
 server.requestTimeout = 60000
 server.on('error', error => { console.error('Automatic playback backend:', error.code || 'startup error'); process.exitCode = 1 })
-server.listen(port, '127.0.0.1', () => { console.log(`Automatic playback backend: https://localhost:${port}/api/media/playback-url (loopback only)` ) })
+server.listen(port, '127.0.0.1', () => { console.log(`Automatic playback backend: ${transport}://localhost:${port}/api/media/playback-url (loopback only)`) })
 process.on('SIGINT', () => { server.close(() => { process.exit(0) }) })
 process.on('SIGTERM', () => { server.close(() => { process.exit(0) }) })
