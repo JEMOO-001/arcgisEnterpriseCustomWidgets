@@ -3,6 +3,7 @@
   "mapWidgetId": "",
   "title": "Select Category",
   "enableCascading": false,
+  "enableMultiChoice": false,
   "buttonLabel": "اختر التصنيف",
   "allItemsLabel": "كل التصنيفات"
 }

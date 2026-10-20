@@ -14,12 +14,8 @@ import {
 import { JimuMapViewComponent, type JimuMapView } from 'jimu-arcgis'
 import { Loading, LoadingType } from 'jimu-ui'
 import { type IMConfig } from '../config'
+import { categoryWhere, type CategoryItem } from './selection'
 import './widget.css'
-
-interface CategoryItem {
-  value: string | number
-  label: string
-}
 
 export default function Widget(props: AllWidgetProps<IMConfig>) {
   const { config, id, useDataSources, intl } = props
@@ -27,17 +23,27 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   /* ── state ── */
   const [categories, setCategories] = React.useState<CategoryItem[]>([])
   const [loading, setLoading] = React.useState(false)
-  const [activeCategory, setActiveCategory] = React.useState<string | null>(null)
+  const [selectedValues, setSelectedValues] = React.useState<string[]>([])
   const [isOpen, setIsOpen] = React.useState(false)
+  const multiChoice = config?.enableMultiChoice === true
 
   /* ── refs ── */
   const dataSourceRef = React.useRef<DataSource | null>(null)
   const jimuMapViewRef = React.useRef<JimuMapView | null>(null)
   const wrapperRef = React.useRef<HTMLDivElement | null>(null)
+  const toggleRef = React.useRef<HTMLButtonElement | null>(null)
+  const selectedValuesRef = React.useRef<string[]>([])
+  const selectionRevisionRef = React.useRef(0)
+  const categoryLoadRevisionRef = React.useRef(0)
   const parentWhereRef = React.useRef<string>('1=1')
   const tableWhereRef = React.useRef<string>('1=1')
   const realFieldNameRef = React.useRef<string>(config?.categoryField || '')
   const hasLoadedRef = React.useRef<boolean>(false)
+
+  React.useEffect(() => () => {
+    ++selectionRevisionRef.current
+    ++categoryLoadRevisionRef.current
+  }, [])
 
   /* ── force overflow visible on all ExB parent wrappers ── */
   React.useEffect(() => {
@@ -70,6 +76,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   /* ── load unique category values (respects layer filters + parent WHERE filter) ── */
   const loadCategories = React.useCallback(async (ds: DataSource, parentWhere: string = '1=1', showLoading: boolean = true) => {
     if (!config?.categoryField) return []
+    const loadRevision = ++categoryLoadRevisionRef.current
 
     if (showLoading) setLoading(true)
     try {
@@ -114,7 +121,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
       }
 
       // Remember the real DB field name so later WHERE clauses (filter + zoom) use it
-      if (realFieldName) {
+      if (realFieldName && loadRevision === categoryLoadRevisionRef.current) {
         realFieldNameRef.current = realFieldName
       }
 
@@ -177,12 +184,12 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
        // All Items that would incorrectly keep the old category filter.
        // Other widget filters are supplied separately through parentWhere.
       pushWhere(parentWhere)
-      if (filterSources.length === 0) {
+      if (filterSources.length === 0 && typeof (ds as any).getRemoteQueryParams !== 'function' && typeof (ds as any).getConfigQueryParams !== 'function') {
         pushWhere(layer?.definitionExpression)
         pushWhere((ds as any).getDefinitionExpression?.())
       }
       const effectiveWhere = filterSources.length > 0 ? filterSources.join(' AND ') : '1=1'
-      tableWhereRef.current = effectiveWhere
+      if (loadRevision === categoryLoadRevisionRef.current) tableWhereRef.current = effectiveWhere
 
       console.log(`[Widget ${id}] Categories effectiveWhere:`, effectiveWhere)
 
@@ -284,15 +291,15 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
       // 7. Sort & save
       const finalItems = Array.from(seen.values())
       finalItems.sort((a, b) => String(a.label).localeCompare(String(b.label), 'ar'))
+      if (loadRevision !== categoryLoadRevisionRef.current) return
       setCategories(finalItems)
       console.log(`[Widget ${id}] Loaded Categories (${finalItems.length}):`, finalItems)
       return finalItems
 
     } catch (err) {
       console.error('Failed to load categories:', err)
-      return []
     } finally {
-      if (showLoading) setLoading(false)
+      if (loadRevision === categoryLoadRevisionRef.current) setLoading(false)
     }
   }, [config?.categoryField, intl, id])
 
@@ -311,59 +318,6 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     }
   }, [loadCategories])
 
-  /* ── CASCADING: detect when another widget filters the shared data source ── */
-  const onDataSourceInfoChange = React.useCallback((info: IMDataSourceInfo) => {
-    if (!dataSourceRef.current || !config?.categoryField) return
-
-    const widgetQueries = info?.widgetQueries
-    let parentWhere = '1=1'
-
-    console.log(`[Widget ${id}] onDataSourceInfoChange — widgetQueries:`, JSON.stringify(widgetQueries))
-
-    if (widgetQueries) {
-      const otherWheres: string[] = []
-
-      // widgetQueries is a Seamless-Immutable object — safely convert
-      const queriesObj: any = typeof (widgetQueries as any).asMutable === 'function'
-        ? (widgetQueries as any).asMutable({ deep: true })
-        : widgetQueries
-
-      Object.keys(queriesObj).forEach((wId: string) => {
-        if (wId !== id) {
-          const w = queriesObj[wId]?.where
-          console.log(`[Widget ${id}] Found query from widget ${wId}:`, w)
-          if (w && w !== '1=1') {
-            otherWheres.push(w)
-          }
-        }
-      })
-
-      if (otherWheres.length > 0) {
-        parentWhere = otherWheres.join(' AND ')
-      }
-    }
-
-    console.log(`[Widget ${id}] Computed parentWhere:`, parentWhere, '| Previous:', parentWhereRef.current)
-
-    // Only re-load categories when the parent filter actually changed
-    if (parentWhere !== parentWhereRef.current) {
-      parentWhereRef.current = parentWhere
-
-      // Load new categories based on the new parent filter
-      loadCategories(dataSourceRef.current, parentWhere, false).then((newCategories: CategoryItem[]) => {
-        // Only reset our own selection if the currently selected value is NO LONGER valid
-        // in the newly filtered list.
-        if (activeCategory !== null) {
-          const stillValid = newCategories?.some((c: CategoryItem) => String(c.value) === activeCategory)
-          if (!stillValid) {
-            setActiveCategory(null);
-            (dataSourceRef.current as any).updateQueryParams({ where: '1=1' } as FeatureLayerQueryParams, id)
-          }
-        }
-      })
-    }
-  }, [config?.categoryField, id, loadCategories, activeCategory])
-
   /* ── publish StringSelectionChangeMessage for cascading ── */
   const publishSelectionMessage = React.useCallback((values: string[]) => {
     MessageManager.getInstance().publishMessage(
@@ -371,38 +325,28 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     )
   }, [id])
 
-  /* ── item selected ── */
-  const onItemSelect = async (val: string | null, label: string) => {
-    setActiveCategory(val);
-    setIsOpen(false)
+  const applySelection = React.useCallback(async (nextValues: string[]) => {
+    const selectionRevision = ++selectionRevisionRef.current
+    selectedValuesRef.current = nextValues
+    setSelectedValues(nextValues)
 
     // Publish for cascading (to other widget types via Action panel)
-    publishSelectionMessage(val !== null ? [val] : [])
+    publishSelectionMessage(nextValues)
 
     const ds = dataSourceRef.current
     if (!ds || !config?.categoryField) return
 
-    let where = '1=1'
-    if (val !== null) {
-      const catItem = categories.find((c: CategoryItem) => String(c.value) === val)
-      const originalValue = catItem ? catItem.value : val
-      const whereField = realFieldNameRef.current || config.categoryField
-
-      if (typeof originalValue === 'number') {
-        where = `${whereField} = ${originalValue}`
-      } else {
-        where = `${whereField} = '${String(originalValue).replace(/'/g, "''")}'`
-      }
-    }
+    const layerDs = ds as any
+    const where = categoryWhere(realFieldNameRef.current || config.categoryField, nextValues, categories)
 
     // 1. Update map filter (widget-scoped)
-    (ds as any).updateQueryParams({ where } as FeatureLayerQueryParams, id)
+    layerDs.updateQueryParams({ where } as FeatureLayerQueryParams, id)
 
     // 2. Zoom to the combined extent of all matching features
     const jmv = jimuMapViewRef.current
     if (jmv?.view) {
       try {
-        const isAllItems = val === null
+        const isAllItems = nextValues.length === 0
 
         // Keep the Table/Data Source filter in the server query. The category
         // condition is added only for a category selection.
@@ -413,11 +357,9 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
           .filter(Boolean)
           .join(' AND ') || '1=1'
 
-        const layerDs = ds as any
         const featureLayer = layerDs.layer || layerDs.getLayerDefinition?.()?.layer
 
         let zoomExtent: any = null
-        const zoomGraphics: any[] = []
 
         const extentWhere = isAllItems ? (tableWhere || '1=1') : combinedWhere
 
@@ -443,6 +385,8 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         }
 
 
+        // Rapid checkbox changes can complete out of order; only the latest may move the map.
+        if (selectionRevision !== selectionRevisionRef.current) return
         if (zoomExtent) {
           const w = (zoomExtent as any).width
           const h = (zoomExtent as any).height
@@ -457,22 +401,72 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
             // Add 20% padding around the extent
             await jmv.view.goTo(zoomExtent.expand(1.2))
           }
-        } else if (zoomGraphics.length > 0) {
-          await jmv.view.goTo(zoomGraphics)
         }
       } catch (err) {
         console.error('Zoom failed:', err)
       }
     }
+  }, [categories, config?.categoryField, id, publishSelectionMessage])
+
+  const onItemSelect = (selected: string) => {
+    const current = selectedValuesRef.current
+    const next = multiChoice
+      ? (current.includes(selected) ? current.filter(code => code !== selected) : [...current, selected])
+      : [selected]
+    if (!multiChoice) {
+      toggleRef.current?.focus()
+      setIsOpen(false)
+    }
+    void applySelection(next)
   }
+
+  const resetSelection = () => {
+    // Move focus before Reset becomes disabled, so clearing does not dismiss the menu.
+    toggleRef.current?.focus()
+    void applySelection([])
+  }
+
+  React.useEffect(() => {
+    if (!multiChoice && selectedValuesRef.current.length > 1) {
+      void applySelection(selectedValuesRef.current.slice(0, 1))
+    }
+  }, [multiChoice, applySelection])
+
+  /* ── CASCADING: detect when another widget filters the shared data source ── */
+  const onDataSourceInfoChange = React.useCallback((info: IMDataSourceInfo) => {
+    if (!dataSourceRef.current || !config?.categoryField) return
+    const widgetQueries: any = info?.widgetQueries
+    const queries = typeof widgetQueries?.asMutable === 'function'
+      ? widgetQueries.asMutable({ deep: true })
+      : widgetQueries || {}
+    const parentWhere = Object.keys(queries)
+      .filter(widgetId => widgetId !== id)
+      .map(widgetId => queries[widgetId]?.where)
+      .filter(where => where && where !== '1=1')
+      .map(where => `(${where})`)
+      .join(' AND ') || '1=1'
+    if (parentWhere === parentWhereRef.current) return
+    parentWhereRef.current = parentWhere
+    // Prevent an older category/extent response from undoing a newer checkbox selection.
+    ++selectionRevisionRef.current
+    void loadCategories(dataSourceRef.current, parentWhere, false).then(newCategories => {
+      if (!newCategories || parentWhere !== parentWhereRef.current) return
+      const available = new Set(newCategories.map(category => String(category.value)))
+      const current = selectedValuesRef.current
+      const retained = current.filter(code => available.has(code))
+      if (retained.length !== current.length) void applySelection(retained)
+    })
+  }, [config?.categoryField, id, loadCategories, applySelection])
 
   /* ── derived labels ── */
   const buttonLabel = config?.buttonLabel || 'اختر التصنيف'
   const allItemsLabel = config?.allItemsLabel || 'كل التصنيفات'
 
-  const displayLabel = activeCategory !== null
-    ? (categories.find((c: CategoryItem) => String(c.value) === activeCategory)?.label || activeCategory)
-    : buttonLabel
+  const selectedLabels = selectedValues.map(code => categories.find(category => String(category.value) === code)?.label || code)
+  const displayLabel = selectedValues.length > 1
+    ? `تم اختيار ${selectedValues.length}`
+    : selectedLabels[0] || buttonLabel
+  const menuId = `${id}-category-menu`
 
   /* ── guard: not configured ── */
   if (!useDataSources?.[0] || !config?.categoryField) {
@@ -494,35 +488,74 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
       )}
 
       {/* Button + Dropdown */}
-      <div className="dropdown-wrapper" ref={wrapperRef}>
+      <div className="dropdown-wrapper" ref={wrapperRef}
+        onBlur={event => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node)) setIsOpen(false)
+        }}
+        onKeyDown={event => {
+          if (event.key === 'Escape') {
+            setIsOpen(false)
+            toggleRef.current?.focus()
+          }
+        }}
+      >
         <button
+          ref={toggleRef}
           className={`dropdown-btn${isOpen ? ' open' : ''}`}
           onClick={() => setIsOpen((prev: boolean) => !prev)}
           type="button"
+          aria-expanded={isOpen}
+          aria-controls={menuId}
+          title={selectedLabels.join('، ')}
         >
-          <span>{displayLabel}</span>
-          <span className="chevron">▼</span>
+          <span className="category-summary">{displayLabel}</span>
+          <span className="chevron" aria-hidden="true">▼</span>
         </button>
 
-        <ul className={`dropdown-list${isOpen ? ' show' : ''}`}>
-          {/* "All" option */}
-          <li
-            className={`dropdown-item${activeCategory === null ? ' selected' : ''}`}
-            onClick={() => onItemSelect(null, allItemsLabel)}
+        <div id={menuId} className={`dropdown-list${isOpen ? ' show' : ''}`} aria-hidden={!isOpen}>
+          <div className="dropdown-toolbar">
+            <span aria-live="polite">{`المحدد: ${selectedValues.length}`}</span>
+            <button type="button" className="category-reset" disabled={!selectedValues.length} onClick={resetSelection}>
+              إعادة تعيين
+            </button>
+          </div>
+          <button
+            type="button"
+            className={`dropdown-item dropdown-all${selectedValues.length === 0 ? ' selected' : ''}`}
+            onClick={() => {
+              resetSelection()
+              if (!multiChoice) setIsOpen(false)
+            }}
           >
             {allItemsLabel}
-          </li>
+          </button>
 
-          {categories.map((cat: CategoryItem) => (
-            <li
-              key={String(cat.value)}
-              className={`dropdown-item${activeCategory === String(cat.value) ? ' selected' : ''}`}
-              onClick={() => onItemSelect(String(cat.value), cat.label)}
-            >
-              {cat.label}
-            </li>
-          ))}
-        </ul>
+          <ul className="category-options" aria-label={buttonLabel}>
+            {categories.map(cat => (
+              <li key={String(cat.value)}>
+                <button
+                  type="button"
+                  className={`dropdown-item category-option${selectedValues.includes(String(cat.value)) ? ' selected' : ''}`}
+                  role={multiChoice ? 'checkbox' : undefined}
+                  aria-checked={multiChoice ? selectedValues.includes(String(cat.value)) : undefined}
+                  aria-pressed={!multiChoice ? selectedValues.includes(String(cat.value)) : undefined}
+                  onClick={() => onItemSelect(String(cat.value))}
+                >
+                  {multiChoice && (
+                    <span className="category-checkbox" aria-hidden="true">
+                      {selectedValues.includes(String(cat.value)) && (
+                        <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
+                          <path d="m3 8 3 3 7-7" fill="none" stroke="currentColor" strokeWidth="2" />
+                        </svg>
+                      )}
+                    </span>
+                  )}
+                  <span className="category-label">{cat.label}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       </div>
 
       {/* Data source + map wiring */}

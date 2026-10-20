@@ -6,6 +6,7 @@ export interface Config {
   title?: string
   buttonLabel?: string
   allItemsLabel?: string
+  enableMultiChoice?: boolean
 }
 
 export type IMConfig = ImmutableObject<Config>

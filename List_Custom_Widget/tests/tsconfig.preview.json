@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "jsx": "react",
+    "module": "esnext",
+    "target": "es2020",
+    "esModuleInterop": true,
+    "skipLibCheck": true
+  },
+  "include": ["preview.tsx", "sdk-boundary.tsx", "../src/**/*"]
+}

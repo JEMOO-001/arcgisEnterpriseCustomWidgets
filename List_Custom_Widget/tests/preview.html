@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>List Category DEV preview</title>
+  <style>
+    body { margin: 0; background: #eef2f4; color: #213744; font-family: Arial, sans-serif; }
+    .preview-note { margin: 20px; line-height: 1.6; }
+    .page-renderer { position: relative; max-width: 920px; margin: 20px auto; }
+    .header { position: relative; z-index: 0; height: 66px; background: #163648; padding: 8px 12px; box-sizing: border-box; }
+    .header-content { position: relative; z-index: 0; display: flex; gap: 12px; height: 50px; }
+    .widget-renderer, .widget-content { position: relative; z-index: 0; }
+    .category { flex: 1; min-width: 0; max-width: 300px; }
+    .page { position: relative; z-index: 1; min-height: 360px; padding: 24px; background: #fff; }
+    .page p { line-height: 1.6; }
+    .page output { display: block; margin: 12px 0; overflow-wrap: anywhere; font-size: 14px; }
+    .sample-list { background: #eef2f4; padding: 12px; margin-top: 20px; }
+    @media (max-width: 600px) { .page-renderer { margin: 20px 8px; } .page { padding: 16px; } }
+  </style>
+</head>
+<body>
+  <p class="preview-note">List Category · DEV test preview<br>Real widget UI with sample categories and a simulated ArcGIS boundary. No Enterprise data or configuration is changed.</p>
+  <div id="root"></div>
+  <script src="/widget-preview.js"></script>
+</body>
+</html>

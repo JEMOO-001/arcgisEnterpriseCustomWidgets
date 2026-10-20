@@ -1,10 +1,10 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
-import { React, jsx, Immutable, type UseDataSource, type IMFieldSchema, type DataSource } from 'jimu-core'
+import { React, jsx, Immutable, type UseDataSource, type IMFieldSchema } from 'jimu-core'
 import { type AllWidgetSettingProps } from 'jimu-for-builder'
 import { SettingSection, SettingRow, MapWidgetSelector } from 'jimu-ui/advanced/setting-components'
 import { DataSourceSelector, AllDataSourceTypes, FieldSelector } from 'jimu-ui/advanced/data-source-selector'
-import { TextInput, Switch, Label } from 'jimu-ui'
+import { TextInput, Switch } from 'jimu-ui'
 import { type IMConfig } from '../config'
 
 export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
@@ -82,6 +82,22 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
                         onChange={onAllItemsLabelChange}
                     />
                 </SettingRow>
+            </SettingSection>
+
+            <SettingSection title="Selection">
+                <SettingRow label="Multi Choice">
+                    <Switch
+                        aria-label="Multi Choice"
+                        checked={config.enableMultiChoice === true}
+                        onChange={(_, checked) => onSettingChange({
+                            id,
+                            config: config.set('enableMultiChoice', checked)
+                        })}
+                    />
+                </SettingRow>
+                <p className="text-secondary mb-0">
+                    Allow several categories to be selected at once. Reset is available in both modes.
+                </p>
             </SettingSection>
 
             {/* ── Data Source ── */}

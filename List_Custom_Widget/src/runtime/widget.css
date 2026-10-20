@@ -39,6 +39,10 @@
   z-index: 100 !important;
 }
 
+/* Page headers are separate stacking contexts below the page body (z-index: 1). */
+.page-renderer > .header:has(.widget-list-custom .dropdown-list.show) {
+  z-index: 2 !important;
+}
 
 
 /* ── Dropdown Wrapper (needed for absolute positioning) ── */
@@ -75,6 +79,13 @@
 
 .dropdown-btn:active {
   transform: scale(0.98);
+}
+
+.widget-list-custom .dropdown-btn > .category-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Chevron ── */
@@ -116,6 +127,109 @@
   opacity: 1;
   visibility: visible;
   transform: translateY(0);
+}
+
+.widget-list-custom .dropdown-toolbar {
+  position: sticky;
+  top: -8px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 12px;
+  background: #fff;
+  border-bottom: 1px solid var(--gold-secondary);
+  font-size: 13px;
+}
+
+.widget-list-custom .category-reset {
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text-dark);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.widget-list-custom .category-reset:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.widget-list-custom .category-options {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.widget-list-custom .category-option,
+.widget-list-custom .dropdown-all {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  box-sizing: border-box;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  color: var(--text-dark);
+  white-space: normal;
+}
+
+.widget-list-custom .dropdown-all {
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  color: var(--text-dark);
+}
+
+.widget-list-custom .category-checkbox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  border: 1px solid var(--text-light);
+  border-radius: 2px;
+}
+
+.widget-list-custom .category-option[aria-checked="true"] .category-checkbox {
+  background: var(--gold-primary);
+  border-color: var(--gold-primary);
+  color: #fff;
+}
+
+.widget-list-custom .category-label {
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+.widget-list-custom .dropdown-item:is(:hover, .selected) {
+  background-color: var(--gold-hover-bg);
+  color: var(--gold-primary);
+}
+
+.widget-list-custom :is(button, input):focus-visible {
+  outline: 2px solid #80600e;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .widget-list-custom .dropdown-list,
+  .widget-list-custom .dropdown-btn,
+  .widget-list-custom .chevron {
+    transition: none;
+  }
 }
 
 /* ── Dropdown Items ── */
