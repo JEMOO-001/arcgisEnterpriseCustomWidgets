@@ -903,6 +903,22 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
   const [categoryScope, setCategoryScope] = React.useState<{ count: number, value?: string } | null>(null)
   const hasResolvedScope = React.useRef(false)
 
+  // A category-filter change invalidates the previous answer immediately. Keeping
+  // a resolved single-value scope until the debounced query finishes briefly shows
+  // the inside chart with a name taken from the newly unfiltered record set.
+  React.useEffect(() => {
+    if (hasResolvedScope.current) {
+      setCategoryScope(null)
+    }
+  }, [
+    dsInfo?.filterVersion,
+    dsInfo?.selectedIds,
+    dsInfo?.widgetQueries,
+    mainDsInfo?.filterVersion,
+    mainDsInfo?.selectedIds,
+    mainDsInfo?.widgetQueries
+  ])
+
   React.useEffect(() => {
     if (!rechartEnabled || !dataSourceId || !triggerField) {
       hasResolvedScope.current = false
@@ -1132,13 +1148,37 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
       return undefined
     }
 
-    const checkLoadedRecords = () => {
+    const checkSelectedRecords = () => {
       const selectedRecords = (ds as QueriableDataSource)?.getSelectedRecords?.() ?? []
       for (const rec of selectedRecords) {
         const name = checkRecordForAirportName(rec)
         if (name) return name
       }
 
+      return undefined
+    }
+
+    const selectedName = checkSelectedRecords()
+    if (selectedName) {
+      setDbAirportName(selectedName)
+      return
+    }
+
+    const crossDsName = findAirportNameFromAllDataSources()
+    if (crossDsName) {
+      setDbAirportName(crossDsName)
+      return
+    }
+
+    // With no explicit single-value filter and no selected record, the data source
+    // is being reset or broadened. Do not guess an airport from its first cached or
+    // queried record; that produced a one-frame title for an unrelated airport.
+    if (!rawVal) {
+      setDbAirportName('')
+      return
+    }
+
+    const checkLoadedRecords = () => {
       const allRecords = (ds as QueriableDataSource)?.getRecords?.() ?? []
       for (const rec of allRecords) {
         const data = rec.getData?.() || {}
@@ -1156,12 +1196,6 @@ export const RechartContainer = (props: RechartContainerProps): React.ReactEleme
     const loadedName = checkLoadedRecords()
     if (loadedName) {
       setDbAirportName(loadedName)
-      return
-    }
-
-    const crossDsName = findAirportNameFromAllDataSources()
-    if (crossDsName) {
-      setDbAirportName(crossDsName)
       return
     }
 
